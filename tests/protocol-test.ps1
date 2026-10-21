@@ -107,9 +107,49 @@ try {
     Start-Sleep -Milliseconds 150
     Assert ($socket.State -eq [System.Net.WebSockets.WebSocketState]::Open) "text frame accepted, socket still open"
 
-    $socket.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "done",
-                       $cancel.Token).GetAwaiter().GetResult() | Out-Null
-    Assert ($socket.State -eq [System.Net.WebSockets.WebSocketState]::Closed) "clean close"
+    # A second scan replaces the first controller.  The old socket must stop
+    # receiving input while the new socket remains usable.
+    $held = [System.Text.Encoding]::UTF8.GetBytes('{"t":"button","button":"left","down":true}')
+    $socket.SendAsync([System.ArraySegment[byte]]::new($held), [System.Net.WebSockets.WebSocketMessageType]::Text, $true,
+                      $cancel.Token).GetAwaiter().GetResult() | Out-Null
+    $replacement = [System.Net.WebSockets.ClientWebSocket]::new()
+    $replacementCancel = [System.Threading.CancellationTokenSource]::new()
+    $replacement.ConnectAsync($uri, $replacementCancel.Token).GetAwaiter().GetResult() | Out-Null
+    Assert ($replacement.State -eq [System.Net.WebSockets.WebSocketState]::Open) "second controller connects"
+
+    $oldClosed = $false
+    $receiveCancel = [System.Threading.CancellationTokenSource]::new(1500)
+    try {
+        $buffer = [byte[]]::new(128)
+        $replacementResult = $socket.ReceiveAsync([System.ArraySegment[byte]]::new($buffer),
+                                                   $receiveCancel.Token).GetAwaiter().GetResult()
+        $oldClosed = $replacementResult.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close
+    } catch {
+        $oldClosed = $true
+    } finally {
+        $receiveCancel.Dispose()
+    }
+    Assert $oldClosed "first controller is closed after replacement"
+
+    $replacementMove = [System.Text.Encoding]::UTF8.GetBytes('{"t":"move","dx":4,"dy":2}')
+    $replacement.SendAsync([System.ArraySegment[byte]]::new($replacementMove),
+                           [System.Net.WebSockets.WebSocketMessageType]::Text, $true,
+                           $replacementCancel.Token).GetAwaiter().GetResult() | Out-Null
+    $replacementRelease = [System.Text.Encoding]::UTF8.GetBytes('{"t":"release"}')
+    $replacement.SendAsync([System.ArraySegment[byte]]::new($replacementRelease),
+                           [System.Net.WebSockets.WebSocketMessageType]::Text, $true,
+                           $replacementCancel.Token).GetAwaiter().GetResult() | Out-Null
+    Assert ($replacement.State -eq [System.Net.WebSockets.WebSocketState]::Open) "replacement controller still accepts input"
+    $replacement.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "done",
+                            $replacementCancel.Token).GetAwaiter().GetResult() | Out-Null
+    $replacement.Dispose()
+    $replacementCancel.Dispose()
+
+    if ($socket.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
+        $socket.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, "done",
+                           $cancel.Token).GetAwaiter().GetResult() | Out-Null
+    }
+    Assert ($socket.State -ne [System.Net.WebSockets.WebSocketState]::Open) "first controller no longer remains open"
     $socket.Dispose()
 
     $rejected = $false

@@ -25,9 +25,33 @@ typedef struct {
     unsigned char buffer[REQUEST_MAX];
     unsigned char payload[FRAME_MAX + 64];
     InputSession session;
+    CRITICAL_SECTION input_lock;
+    volatile LONG superseded;
+    volatile LONG refs;
 } Connection;
 
 static volatile LONG g_next_id = 1;
+static Connection *g_active_connection = NULL;
+
+static void connection_add_ref(Connection *connection)
+{
+    InterlockedIncrement(&connection->refs);
+}
+
+static void connection_release(Connection *connection)
+{
+    if (InterlockedDecrement(&connection->refs) == 0) {
+        DeleteCriticalSection(&connection->input_lock);
+        free(connection);
+    }
+}
+
+static void connection_dispose_input(Connection *connection)
+{
+    EnterCriticalSection(&connection->input_lock);
+    input_session_dispose(&connection->session);
+    LeaveCriticalSection(&connection->input_lock);
+}
 
 /* ------------------------------------------------------------------ */
 /* Socket helpers                                                     */
@@ -129,28 +153,45 @@ static const char *find_header(const char *request, size_t request_len, const ch
 /* Active connection bookkeeping                                      */
 /* ------------------------------------------------------------------ */
 
-static void install_active(App *app, SOCKET socket_handle, uint64_t id)
+static bool install_active(App *app, Connection *connection)
 {
-    SOCKET previous = INVALID_SOCKET;
+    Connection *previous = NULL;
     EnterCriticalSection(&app->lock);
-    previous = app->active;
-    app->active = socket_handle;
-    app->active_id = id;
+    if (InterlockedCompareExchange(&app->server_stop, 0, 0)) {
+        LeaveCriticalSection(&app->lock);
+        return false;
+    }
+    previous = g_active_connection;
+    if (previous) {
+        connection_add_ref(previous);
+    }
+    connection_add_ref(connection); /* active reference */
+    g_active_connection = connection;
+    app->active = connection->socket;
+    app->active_id = connection->id;
     InterlockedExchange(&app->connected, 1);
     LeaveCriticalSection(&app->lock);
 
-    if (previous != INVALID_SOCKET) {
+    if (previous) {
         /* Only one controller at a time; the previous one is dropped. */
-        shutdown(previous, SD_BOTH);
+        InterlockedExchange(&previous->superseded, 1);
+        EnterCriticalSection(&previous->input_lock);
+        input_release_all(&previous->session);
+        LeaveCriticalSection(&previous->input_lock);
+        shutdown(previous->socket, SD_BOTH);
+        connection_release(previous); /* drop temporary reference */
+        connection_release(previous); /* drop previous active reference */
     }
     PostMessageW(app->tray, WM_APP_STATUS, 1, 0);
+    return true;
 }
 
-static void remove_active(App *app, uint64_t id)
+static void remove_active(App *app, Connection *connection)
 {
     bool cleared = false;
     EnterCriticalSection(&app->lock);
-    if (app->active_id == id) {
+    if (g_active_connection == connection) {
+        g_active_connection = NULL;
         app->active = INVALID_SOCKET;
         app->active_id = 0;
         InterlockedExchange(&app->connected, 0);
@@ -159,6 +200,7 @@ static void remove_active(App *app, uint64_t id)
     LeaveCriticalSection(&app->lock);
 
     if (cleared) {
+        connection_release(connection); /* drop active reference */
         PostMessageW(app->tray, WM_APP_STATUS, 0, 0);
     }
 }
@@ -325,12 +367,19 @@ static void ws_session(Connection *connection)
     connection->last_pong_ms = now_ms();
     connection->last_ping_ms = now_ms();
 
-    install_active(app, socket_handle, connection->id);
+    if (!install_active(app, connection)) {
+        connection_dispose_input(connection);
+        return;
+    }
     app_log(app, "ws connected id=%llu", (unsigned long long)connection->id);
 
     bool running = true;
     while (running && !InterlockedCompareExchange(&app->server_stop, 0, 0)) {
         for (;;) {
+            if (InterlockedCompareExchange(&connection->superseded, 0, 0)) {
+                running = false;
+                break;
+            }
             int opcode = 0;
             size_t payload_len = 0;
             size_t consumed = 0;
@@ -352,12 +401,19 @@ static void ws_session(Connection *connection)
             switch (opcode) {
             case 0x1: /* text */
                 if (payload_len > 0 && payload_len <= FRAME_MAX) {
+                    EnterCriticalSection(&connection->input_lock);
+                    if (InterlockedCompareExchange(&connection->superseded, 0, 0)) {
+                        LeaveCriticalSection(&connection->input_lock);
+                        running = false;
+                        break;
+                    }
                     input_session_set_speed(&connection->session,
                         (int)InterlockedCompareExchange(&app->mouse_speed_percent, 0, 0),
                         (int)InterlockedCompareExchange(&app->scroll_speed_percent, 0, 0));
                     if (!input_apply_json(&connection->session, (const char *)connection->payload)) {
                         input_release_all(&connection->session);
                     }
+                    LeaveCriticalSection(&connection->input_lock);
                 }
                 break;
             case 0x8: /* close */
@@ -422,8 +478,8 @@ static void ws_session(Connection *connection)
     }
 
     app_log(app, "ws closed id=%llu", (unsigned long long)connection->id);
-    input_session_dispose(&connection->session);
-    remove_active(app, connection->id);
+    connection_dispose_input(connection);
+    remove_active(app, connection);
 }
 
 /* ------------------------------------------------------------------ */
@@ -505,8 +561,8 @@ static DWORD WINAPI connection_thread(LPVOID parameter)
 
     if (!has_request_end(connection->buffer, connection->buffer_len)) {
         closesocket(socket_handle);
-        input_session_dispose(&connection->session);
-        free(connection);
+        connection_dispose_input(connection);
+        connection_release(connection);
         return 0;
     }
 
@@ -529,8 +585,8 @@ static DWORD WINAPI connection_thread(LPVOID parameter)
     if (sscanf_s(request_line, "%7s %399s", method, (unsigned)sizeof(method),
                  target, (unsigned)sizeof(target)) != 2) {
         closesocket(socket_handle);
-        input_session_dispose(&connection->session);
-        free(connection);
+        connection_dispose_input(connection);
+        connection_release(connection);
         return 0;
     }
 
@@ -539,8 +595,8 @@ static DWORD WINAPI connection_thread(LPVOID parameter)
         write_status(socket_handle, 405, "Method Not Allowed", "text/plain; charset=utf-8",
                      "Method Not Allowed", 18, false, NULL);
         closesocket(socket_handle);
-        input_session_dispose(&connection->session);
-        free(connection);
+        connection_dispose_input(connection);
+        connection_release(connection);
         return 0;
     }
 
@@ -564,23 +620,23 @@ static DWORD WINAPI connection_thread(LPVOID parameter)
         } else if (!head_only && ws_handshake(connection)) {
             ws_session(connection);
             closesocket(socket_handle);
-            free(connection);
+            connection_release(connection);
             return 0;
         } else {
             write_status(socket_handle, 400, "Bad Request", "text/plain; charset=utf-8",
                          "Bad Request", 11, false, NULL);
         }
         closesocket(socket_handle);
-        input_session_dispose(&connection->session);
-        free(connection);
+        connection_dispose_input(connection);
+        connection_release(connection);
         return 0;
     }
 
     handle_http(connection, method, path, head_only);
 
     closesocket(socket_handle);
-    input_session_dispose(&connection->session);
-    free(connection);
+    connection_dispose_input(connection);
+    connection_release(connection);
     return 0;
 }
 
@@ -609,14 +665,16 @@ static DWORD WINAPI listener_thread(LPVOID parameter)
         connection->app = app;
         connection->socket = client;
         connection->id = (uint64_t)InterlockedIncrement(&g_next_id);
+        InitializeCriticalSection(&connection->input_lock);
+        connection->refs = 1; /* connection thread owns the initial reference */
 
         input_session_init(&connection->session, app->dry_run);
 
         HANDLE thread = CreateThread(NULL, 0, connection_thread, connection, 0, NULL);
         if (!thread) {
-            input_session_dispose(&connection->session);
+            connection_dispose_input(connection);
             closesocket(client);
-            free(connection);
+            connection_release(connection);
             continue;
         }
         CloseHandle(thread);
@@ -629,6 +687,7 @@ bool server_start(App *app)
     app->listener = INVALID_SOCKET;
     app->active = INVALID_SOCKET;
     app->active_id = 0;
+    g_active_connection = NULL;
 
     char address[64];
     if (!net_local_ipv4(address, sizeof(address))) {
@@ -702,15 +761,30 @@ void server_stop(App *app)
         closesocket(listener);
     }
 
+    Connection *active_connection = NULL;
     EnterCriticalSection(&app->lock);
+    active_connection = g_active_connection;
+    if (active_connection) {
+        connection_add_ref(active_connection);
+        g_active_connection = NULL;
+    }
     SOCKET active = app->active;
     app->active = INVALID_SOCKET;
     app->active_id = 0;
     InterlockedExchange(&app->connected, 0);
     LeaveCriticalSection(&app->lock);
 
+    if (active_connection) {
+        InterlockedExchange(&active_connection->superseded, 1);
+        EnterCriticalSection(&active_connection->input_lock);
+        input_release_all(&active_connection->session);
+        LeaveCriticalSection(&active_connection->input_lock);
+    }
     if (active != INVALID_SOCKET) {
         shutdown(active, SD_BOTH);
+    }
+    if (active_connection) {
+        connection_release(active_connection); /* drop active reference */
     }
     app_log(app, "server stopped");
 }
@@ -720,16 +794,31 @@ void server_rotate_token(App *app)
     char token[TOKEN_HEX_CHARS + 1];
     make_token(token);
 
+    Connection *active_connection = NULL;
     EnterCriticalSection(&app->lock);
     memcpy(app->pairing.token, token, sizeof(token));
+    active_connection = g_active_connection;
+    if (active_connection) {
+        connection_add_ref(active_connection);
+        g_active_connection = NULL;
+    }
     SOCKET active = app->active;
     app->active = INVALID_SOCKET;
     app->active_id = 0;
     InterlockedExchange(&app->connected, 0);
     LeaveCriticalSection(&app->lock);
 
+    if (active_connection) {
+        InterlockedExchange(&active_connection->superseded, 1);
+        EnterCriticalSection(&active_connection->input_lock);
+        input_release_all(&active_connection->session);
+        LeaveCriticalSection(&active_connection->input_lock);
+    }
     if (active != INVALID_SOCKET) {
         shutdown(active, SD_BOTH);
+    }
+    if (active_connection) {
+        connection_release(active_connection); /* drop active reference */
     }
     app_log(app, "token rotated: %s", token);
     if (app->tray) {
