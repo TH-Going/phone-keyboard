@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#e9ebee" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101114" media="(prefers-color-scheme: dark)">
+  <title>远程键鼠</title>
+  <link rel="stylesheet" href="/assets/controller.css">
+  <script src="/assets/controller.js" defer></script>
+</head>
+<body>
+  <main class="remote" data-mode="split" aria-label="远程键鼠控制">
+    <div class="workspace">
+      <section class="keyboard" aria-label="键盘">
+        <div class="key-row function-row">
+          <button class="key" type="button" data-code="F1">F1</button>
+          <button class="key" type="button" data-code="F2">F2</button>
+          <button class="key" type="button" data-code="F3">F3</button>
+          <button class="key" type="button" data-code="F4">F4</button>
+          <button class="key" type="button" data-code="F5">F5</button>
+          <button class="key" type="button" data-code="F6">F6</button>
+          <button class="key" type="button" data-code="F7">F7</button>
+          <button class="key" type="button" data-code="F8">F8</button>
+          <button class="key" type="button" data-code="F9">F9</button>
+          <button class="key" type="button" data-code="F10">F10</button>
+          <button class="key" type="button" data-code="F11">F11</button>
+          <button class="key" type="button" data-code="F12">F12</button>
+        </div>
+        <div class="key-row utility-row">
+          <button class="key" type="button" data-code="Escape">Esc</button>
+          <button class="key" type="button" data-code="Tab">Tab</button>
+          <button class="key" type="button" data-code="CapsLock" data-action="caps" aria-pressed="false" aria-describedby="case-help">Caps Lock</button>
+          <button class="key" type="button" data-code="ControlLeft" aria-pressed="false">Ctrl</button>
+          <button class="key" type="button" data-code="AltLeft" aria-pressed="false">Alt</button>
+          <button class="key" type="button" data-code="MetaLeft" aria-pressed="false" aria-label="Windows 键">Win</button>
+        </div>
+        <div class="key-layer" id="letter-layer">
+          <div class="key-row">
+            <button class="key" type="button" data-code="KeyQ" data-letter="q">q</button>
+            <button class="key" type="button" data-code="KeyW" data-letter="w">w</button>
+            <button class="key" type="button" data-code="KeyE" data-letter="e">e</button>
+            <button class="key" type="button" data-code="KeyR" data-letter="r">r</button>
+            <button class="key" type="button" data-code="KeyT" data-letter="t">t</button>
+            <button class="key" type="button" data-code="KeyY" data-letter="y">y</button>
+            <button class="key" type="button" data-code="KeyU" data-letter="u">u</button>
+            <button class="key" type="button" data-code="KeyI" data-letter="i">i</button>
+            <button class="key" type="button" data-code="KeyO" data-letter="o">o</button>
+            <button class="key" type="button" data-code="KeyP" data-letter="p">p</button>
+          </div>
+          <div class="key-row home-row">
+            <button class="key" type="button" data-code="KeyA" data-letter="a">a</button>
+            <button class="key" type="button" data-code="KeyS" data-letter="s">s</button>
+            <button class="key" type="button" data-code="KeyD" data-letter="d">d</button>
+            <button class="key" type="button" data-code="KeyF" data-letter="f">f</button>
+            <button class="key" type="button" data-code="KeyG" data-letter="g">g</button>
+            <button class="key" type="button" data-code="KeyH" data-letter="h">h</button>
+            <button class="key" type="button" data-code="KeyJ" data-letter="j">j</button>
+            <button class="key" type="button" data-code="KeyK" data-letter="k">k</button>
+            <button class="key" type="button" data-code="KeyL" data-letter="l">l</button>
+          </div>
+          <div class="key-row shift-row">
+            <button class="key" type="button" data-code="ShiftLeft" aria-pressed="false" aria-describedby="case-help">Shift</button>
+            <button class="key" type="button" data-code="KeyZ" data-letter="z">z</button>
+            <button class="key" type="button" data-code="KeyX" data-letter="x">x</button>
+            <button class="key" type="button" data-code="KeyC" data-letter="c">c</button>
+            <button class="key" type="button" data-code="KeyV" data-letter="v">v</button>
+            <button class="key" type="button" data-code="KeyB" data-letter="b">b</button>
+            <button class="key" type="button" data-code="KeyN" data-letter="n">n</button>
+            <button class="key" type="button" data-code="KeyM" data-letter="m">m</button>
+            <button class="key" type="button" data-code="Backspace" aria-label="退格">⌫</button>
+          </div>
+        </div>
+        <div class="key-layer" id="number-layer" hidden>
+          <div class="key-row">
+            <button class="key" type="button" data-code="Digit1" data-shift="false">1</button>
+            <button class="key" type="button" data-code="Digit2" data-shift="false">2</button>
+            <button class="key" type="button" data-code="Digit3" data-shift="false">3</button>
+            <button class="key" type="button" data-code="Digit4" data-shift="false">4</button>
+            <button class="key" type="button" data-code="Digit5" data-shift="false">5</button>
+            <button class="key" type="button" data-code="Digit6" data-shift="false">6</button>
+            <button class="key" type="button" data-code="Digit7" data-shift="false">7</button>
+            <button class="key" type="button" data-code="Digit8" data-shift="false">8</button>
+            <button class="key" type="button" data-code="Digit9" data-shift="false">9</button>
+            <button class="key" type="button" data-code="Digit0" data-shift="false">0</button>
+          </div>
+          <div class="key-row">
+            <button class="key" type="button" data-code="Digit2" data-shift="true">@</button>
+            <button class="key" type="button" data-code="Digit3" data-shift="true">#</button>
+            <button class="key" type="button" data-code="Digit4" data-shift="true">$</button>
+            <button class="key" type="button" data-code="Digit5" data-shift="true">%</button>
+            <button class="key" type="button" data-code="Digit7" data-shift="true">&amp;</button>
+            <button class="key" type="button" data-code="Digit8" data-shift="true">*</button>
+            <button class="key" type="button" data-code="Digit9" data-shift="true">(</button>
+            <button class="key" type="button" data-code="Digit0" data-shift="true">)</button>
+            <button class="key" type="button" data-code="Minus" data-shift="false">-</button>
+            <button class="key" type="button" data-code="Equal" data-shift="false">=</button>
+          </div>
+          <div class="key-row shift-row">
+            <button class="key" type="button" data-code="ShiftLeft" aria-pressed="false" aria-describedby="case-help">Shift</button>
+            <button class="key" type="button" data-code="Slash" data-shift="false">/</button>
+            <button class="key" type="button" data-code="Semicolon" data-shift="true">:</button>
+            <button class="key" type="button" data-code="Semicolon" data-shift="false">;</button>
+            <button class="key" type="button" data-code="Digit1" data-shift="true">!</button>
+            <button class="key" type="button" data-code="Slash" data-shift="true">?</button>
+            <button class="key" type="button" data-code="Equal" data-shift="true">+</button>
+            <button class="key" type="button" data-code="Minus" data-shift="true">_</button>
+            <button class="key" type="button" data-code="Backspace" aria-label="退格">⌫</button>
+          </div>
+        </div>
+        <div class="key-row bottom-row">
+          <button class="key" type="button" data-action="numbers" aria-label="切换到数字和符号">123</button>
+          <button class="key" type="button" data-action="language" aria-label="中英切换（单击 Shift）">中/英</button>
+          <button class="key" type="button" data-code="Comma">,</button>
+          <button class="key" type="button" data-code="Space">空格</button>
+          <button class="key" type="button" data-code="Period">.</button>
+          <button class="key" type="button" data-code="Enter" aria-label="回车">↵</button>
+        </div>
+      </section>
+      <button class="mode-divider" type="button" role="slider" aria-label="拖动切换模式" aria-describedby="mode-help" aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="2" aria-valuenow="1" aria-valuetext="键鼠同屏">
+        <span class="mode-grip" aria-hidden="true"></span>
+      </button>
+      <section class="mouse" aria-label="鼠标操作区">
+        <div class="pad" id="pad" role="group" aria-label="触控板：滑动移动，轻点单击，长按后拖动，双指滚动或轻点右键">
+          <div class="pad-hint" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m4 3 7.07 17 2.51-6.42L20 11.07 4 3z"></path></svg>
+            <span>触控板</span>
+          </div>
+          <div class="touch-point" id="touch-point" aria-hidden="true"></div>
+        </div>
+      </section>
+    </div>
+    <p class="accessible" id="mode-help">向左拖动展开鼠标，向右拖动展开键盘；全屏时反向拖动回到键鼠同屏。也可使用左右方向键切换。</p>
+    <p class="accessible" id="case-help">Shift 用于下一次按键或鼠标操作，操作后释放。Caps Lock 独立切换大写锁定。</p>
+    <output class="accessible" id="mode-status" aria-live="polite">键鼠同屏</output>
+  </main>
+</body>
+</html>

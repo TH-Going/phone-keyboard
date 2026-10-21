@@ -1,0 +1,6 @@
+#include <winver.h>
+
+1 ICON "app.ico"
+
+/* Application manifest: per-monitor DPI awareness and Windows 10/11 support. */
+1 24 "app.manifest"
