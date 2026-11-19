@@ -51,3 +51,10 @@ Desktop.ini
 .env
 .env.*
 !.env.example
+
+# 本地会话与工具数据
+.dsh-ops/
+.workbuddy/
+
+# 根目录旧版构建产物（正式输出在 release/）
+/PhoneKeyboardC.exe

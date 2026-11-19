@@ -78,7 +78,9 @@ void app_write_state(App *app)
 /* Commands                                                           */
 /* ------------------------------------------------------------------ */
 
-#define SETTINGS_KEY L"Software\\PhoneKeyboardC"
+#define SETTINGS_KEY L"Software\\PalmKey"
+/* 改名前的设置位置，仅用于首次启动时回读，避免升级后灵敏度被重置。 */
+#define SETTINGS_KEY_LEGACY L"Software\\PhoneKeyboardC"
 
 static int normalize_speed(int percent)
 {
@@ -87,16 +89,26 @@ static int normalize_speed(int percent)
     return ((percent + SPEED_STEP_PERCENT / 2) / SPEED_STEP_PERCENT) * SPEED_STEP_PERCENT;
 }
 
-static int load_speed_setting(const wchar_t *name)
+/* 返回 0 表示该位置没有可用设置。 */
+static int read_speed_setting(const wchar_t *key_path, const wchar_t *name)
 {
-    DWORD value = 100;
+    DWORD value = 0;
     DWORD bytes = sizeof(value);
-    if (RegGetValueW(HKEY_CURRENT_USER, SETTINGS_KEY, name, RRF_RT_REG_DWORD,
+    if (RegGetValueW(HKEY_CURRENT_USER, key_path, name, RRF_RT_REG_DWORD,
                      NULL, &value, &bytes) != ERROR_SUCCESS ||
         value < SPEED_MIN_PERCENT || value > SPEED_MAX_PERCENT) {
-        return 100;
+        return 0;
     }
     return normalize_speed((int)value);
+}
+
+static int load_speed_setting(const wchar_t *name)
+{
+    int percent = read_speed_setting(SETTINGS_KEY, name);
+    if (percent == 0) {
+        percent = read_speed_setting(SETTINGS_KEY_LEGACY, name);
+    }
+    return percent ? percent : 100;
 }
 
 static void load_speed_settings(App *app)
@@ -415,8 +427,8 @@ static bool argument_is(const wchar_t *argument, const wchar_t *name)
 static void print_help(void)
 {
     MessageBoxW(NULL,
-                L"手键（纯 C 版）\n\n"
-                L"Usage: PhoneKeyboardC.exe [options]\n\n"
+                L"掌键 PalmKey（纯 C 版）\n\n"
+                L"Usage: PalmKey.exe [options]\n\n"
                 L"  --port <n>          listen on a fixed TCP port (default: auto)\n"
                 L"  --token <32 hex>    use a fixed pairing token (default: random)\n"
                 L"  --log <file>        append diagnostics to a UTF-8 log file\n"
@@ -581,6 +593,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous_instance,
 
     HANDLE single_instance = NULL;
     if (!app->allow_multi) {
+        /* 名称沿用改名前的值：升级到「掌键」后仍能与旧版互斥，避免两份同时抢占输入。 */
         single_instance = CreateMutexW(NULL, TRUE, L"Local\\PhoneKeyboardC-SingleInstance");
         if (!single_instance) {
             return 1;

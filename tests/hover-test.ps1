@@ -1,7 +1,7 @@
-# Real-process smoke checks for the main window, tray activation and server.
+﻿# Real-process smoke checks for the main window, tray activation and server.
 # The historical filename is kept. No physical mouse or keyboard is moved.
 param(
-    [string]$Executable = (Join-Path $PSScriptRoot '..\release\PhoneKeyboardC.exe'),
+    [string]$Executable = (Join-Path $PSScriptRoot '..\release\PalmKey.exe'),
     [string]$SnapshotDir = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -104,10 +104,10 @@ try {
     )
     $state = Wait-State { param($s) $s['visible'] -eq '1' }
     Assert ($state['visible'] -eq '1') 'normal startup shows the main window'
-    $script:window = [MainWindowProbe]::Find($process.Id, 'PhoneKeyboardCard')
-    $tray = [MainWindowProbe]::Find($process.Id, 'PhoneKeyboardTray')
+    $script:window = [MainWindowProbe]::Find($process.Id, 'PalmKeyCard')
+    $tray = [MainWindowProbe]::Find($process.Id, 'PalmKeyTray')
     if ($window -eq [IntPtr]::Zero -or $tray -eq [IntPtr]::Zero) { throw 'Application windows not found' }
-    Assert ([MainWindowProbe]::Title($window) -eq '手键') 'native window title is 手键'
+    Assert ([MainWindowProbe]::Title($window) -eq '掌键') 'native window title is 掌键'
     $rect = [MainWindowProbe+RECT]::new()
     [MainWindowProbe]::GetWindowRect($window, [ref]$rect) | Out-Null
     $dpi = [MainWindowProbe]::GetDpiForWindow($window)

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity type="win32" name="PhoneKeyboardC" version="1.0.0.0" processorArchitecture="*" />
-  <description>Phone Keyboard (pure C build)</description>
+  <assemblyIdentity type="win32" name="PalmKey" version="1.0.0.0" processorArchitecture="*" />
+  <description>PalmKey - control your PC from a phone browser</description>
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
       <!-- Windows 10 / 11 -->

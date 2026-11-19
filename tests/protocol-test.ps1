@@ -11,7 +11,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$exe = Join-Path $PSScriptRoot "..\release\PhoneKeyboardC.exe"
+$exe = Join-Path $PSScriptRoot "..\release\PalmKey.exe"
 $log = Join-Path $env:TEMP "pk_protocol.log"
 $port = 47831
 $token = "0123456789abcdef0123456789abcdef"

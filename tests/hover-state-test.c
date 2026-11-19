@@ -27,7 +27,7 @@ static LSTATUS WINAPI test_reg_get_value(HKEY key, LPCWSTR path, LPCWSTR name, D
 {
     (void)type;
     int index = setting_index(name);
-    if (key != HKEY_CURRENT_USER || wcscmp(path, L"Software\\PhoneKeyboardC") != 0 ||
+    if (key != HKEY_CURRENT_USER || wcscmp(path, L"Software\\PalmKey") != 0 ||
         flags != RRF_RT_REG_DWORD || *bytes != sizeof(DWORD) || index < 0) return ERROR_INVALID_PARAMETER;
     if (test_read_result[index] != ERROR_SUCCESS) return test_read_result[index];
     memcpy(data, &test_saved_speed[index], sizeof(DWORD));
@@ -39,7 +39,7 @@ static LSTATUS WINAPI test_reg_create_key(HKEY key, LPCWSTR path, DWORD reserved
                                          PHKEY result, LPDWORD disposition)
 {
     (void)reserved; (void)name; (void)security; (void)disposition;
-    if (key != HKEY_CURRENT_USER || wcscmp(path, L"Software\\PhoneKeyboardC") != 0 ||
+    if (key != HKEY_CURRENT_USER || wcscmp(path, L"Software\\PalmKey") != 0 ||
         options != REG_OPTION_NON_VOLATILE || access != KEY_SET_VALUE) return ERROR_INVALID_PARAMETER;
     if (test_create_result != ERROR_SUCCESS) return test_create_result;
     *result = (HKEY)(ULONG_PTR)1;
@@ -171,7 +171,7 @@ int wmain(int argc, wchar_t **argv)
     if (!app.card) return 1;
     wchar_t title[64];
     GetWindowTextW(app.card, title, 64);
-    check(wcscmp(title, L"手键") == 0, "the window is named 手键");
+    check(wcscmp(title, L"掌键") == 0, "the window is named 掌键");
     LONG_PTR style = GetWindowLongPtrW(app.card, GWL_EXSTYLE);
     check(!(style & (WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_LAYERED)),
           "main window accepts native controls and is not always on top");

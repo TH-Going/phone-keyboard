@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 # Builds the pure C port with the MSVC toolchain that ships with the Visual
-# Studio Build Tools. Output: release\PhoneKeyboardC.exe (single file, no
+# Studio Build Tools. Output: release\PalmKey.exe (single file, no
 # WebView2 dependency).
 
 $root = $PSScriptRoot
@@ -47,7 +47,7 @@ $compileFlags = @(
     "/I""$build"""
 ) -join " "
 
-$exe = Join-Path $release "PhoneKeyboardC.exe"
+$exe = Join-Path $release "PalmKey.exe"
 $batch = @"
 @echo off
 setlocal

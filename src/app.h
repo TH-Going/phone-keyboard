@@ -45,10 +45,10 @@
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "iphlpapi.lib")
 
-#define APP_TITLE L"手键"
+#define APP_TITLE L"掌键"
 
-#define TRAY_CLASS L"PhoneKeyboardTray"
-#define CARD_CLASS L"PhoneKeyboardCard"
+#define TRAY_CLASS L"PalmKeyTray"
+#define CARD_CLASS L"PalmKeyCard"
 
 #define TRAY_ICON_ID 1
 
