@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>掌键 · 桌面窗口质感</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+
+:root{
+  --sans:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",system-ui,-apple-system,sans-serif;
+  --mono:"Cascadia Mono","SF Mono",Consolas,ui-monospace,monospace;
+
+  --ink:#11151C;
+  --ink-2:#4A5260;
+  --ink-3:#868D99;
+  --line:#EDEEF1;
+  --accent:#2B3240;
+}
+
+html{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+body{
+  margin:0;background:#fff;color:var(--ink);
+  font:14px/1.7 var(--sans);
+}
+.wrap{max-width:1000px;margin:0 auto;padding:0 40px 140px}
+
+/* ---------- 顶部 ---------- */
+.masthead{
+  display:flex;align-items:center;gap:9px;
+  height:64px;border-bottom:1px solid var(--line);
+}
+.masthead .mark{
+  width:20px;height:20px;border-radius:6px;flex:none;
+  background:linear-gradient(160deg,#414B5C,#222833);
+  display:grid;place-items:center;
+  box-shadow:0 1px 2px rgba(16,24,40,.2),inset 0 1px 0 rgba(255,255,255,.16);
+}
+.masthead .name{font-size:13px;font-weight:600;letter-spacing:-.01em}
+.masthead .sub{font-size:11.5px;color:var(--ink-3)}
+.masthead .meta{
+  margin-left:auto;font:10.5px/1 var(--mono);letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3);
+}
+
+/* ---------- 标题 ---------- */
+.intro{padding:64px 0 8px}
+.intro h1{
+  margin:0;font-size:34px;line-height:1.3;font-weight:600;letter-spacing:-.025em;
+}
+.intro p{
+  margin:14px 0 0;max-width:56ch;font-size:14px;line-height:1.85;color:var(--ink-2);
+}
+
+/* ---------- 舞台 ---------- */
+.toolbar{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  margin:36px 0 14px;
+}
+.toolbar .label{
+  font:10.5px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3);margin-right:4px;
+}
+.seg{
+  display:inline-flex;gap:2px;padding:3px;border-radius:9px;
+  background:#F4F5F7;box-shadow:inset 0 0 0 1px rgba(16,24,40,.04);
+}
+.seg button{
+  appearance:none;border:0;background:transparent;cursor:pointer;
+  height:26px;padding:0 11px;border-radius:6px;
+  font:12px/1 var(--sans);color:#5B6472;
+  transition:background .15s ease,color .15s ease,box-shadow .15s ease;
+}
+.seg button:hover{color:#11151C}
+.seg button[aria-pressed="true"]{
+  background:#fff;color:#11151C;
+  box-shadow:0 1px 2px rgba(16,24,40,.13),0 0 0 1px rgba(16,24,40,.03);
+}
+.toolbar .spacer{flex:1}
+
+.stage-panel{
+  border-radius:24px;padding:72px 40px;
+  background:
+    radial-gradient(130% 100% at 26% 0%,#F6F7F9 0%,rgba(246,247,249,0) 55%),
+    linear-gradient(158deg,#EDEFF2 0%,#E4E7EB 55%,#DCE0E6 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.85),inset 0 0 0 1px rgba(16,24,40,.04);
+  display:flex;justify-content:center;align-items:center;
+  min-height:620px;
+}
+.stage{
+  --z:1.5;
+  position:relative;flex:none;
+  width:calc(282px * var(--z));
+  height:calc(338px * var(--z));
+}
+
+/* ============================================================
+   窗口
+   ============================================================ */
+.win{
+  position:absolute;top:0;left:0;
+  width:282px;height:338px;
+  transform:scale(var(--z));transform-origin:0 0;
+
+  --w-bg-a:#FBFCFD;
+  --w-bg-b:#F3F5F7;
+  --w-tile:#FFFFFF;
+  --w-tile-line:#E6E8EC;
+  --w-hair:#E9EAEE;
+  --w-title:#1F242C;
+  --w-text:#24272D;
+  --w-mute:#6B7280;
+  --w-faint:#6E7683;
+  --w-track:#E2E5EA;
+  --w-icon:#5B6472;
+  --w-icon-hover:#F1F2F5;
+  --w-icon-press:#E7E9ED;
+  --w-btn:#2B3240;
+  --w-btn-hover:#242A36;
+  --w-btn-press:#1C212B;
+  --w-btn-fg:#FFFFFF;
+  --w-btn-hi:rgba(255,255,255,.13);
+  --w-btn-ring:rgba(16,24,40,.09);
+
+  border-radius:14px;
+  background:linear-gradient(180deg,var(--w-bg-a) 0%,var(--w-bg-b) 100%);
+  box-shadow:
+    0 0 0 1px rgba(16,24,40,.07),
+    inset 0 1px 0 rgba(255,255,255,.9),
+    0 2px 4px rgba(16,24,40,.045),
+    0 12px 24px -8px rgba(16,24,40,.15),
+    0 32px 60px -24px rgba(16,24,40,.22);
+  overflow:hidden;
+  user-select:none;
+  color:var(--w-text);
+}
+.win.theme-dark{
+  --w-bg-a:#1B1E24;
+  --w-bg-b:#15181D;
+  --w-tile:#FFFFFF;
+  --w-tile-line:rgba(255,255,255,.10);
+  --w-hair:#2A2E36;
+  --w-title:#F3F5F8;
+  --w-text:#E4E8EE;
+  --w-mute:#98A0AC;
+  --w-faint:#8A93A0;
+  --w-track:#2C313A;
+  --w-icon:#9AA2AE;
+  --w-icon-hover:#252A31;
+  --w-icon-press:#2F353D;
+  --w-btn:#EDEFF3;
+  --w-btn-hover:#FFFFFF;
+  --w-btn-press:#D9DDE4;
+  --w-btn-fg:#171B21;
+  --w-btn-hi:rgba(255,255,255,.55);
+  --w-btn-ring:rgba(0,0,0,.35);
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,.55),
+    inset 0 1px 0 rgba(255,255,255,.07),
+    0 10px 20px -8px rgba(8,12,20,.5),
+    0 30px 56px -22px rgba(8,12,20,.45);
+}
+
+/* 顶栏 */
+.win-hd{
+  height:44px;display:flex;align-items:center;padding:0 10px;
+}
+.win-hd .title{
+  flex:1;font-size:13px;font-weight:600;color:var(--w-title);letter-spacing:-.006em;
+}
+.win[data-view="pair"] .title{padding-left:6px}
+.win-hd .hd-back{display:none;margin-right:2px}
+.win[data-view="settings"] .hd-back{display:grid}
+.win[data-view="settings"] .title{font-size:15px;letter-spacing:-.01em}
+.ibtn{
+  width:28px;height:28px;padding:0;border:0;border-radius:8px;
+  background:transparent;color:var(--w-icon);cursor:pointer;
+  display:grid;place-items:center;
+  transition:background .13s ease,color .13s ease,transform .12s ease;
+}
+.ibtn:hover{background:var(--w-icon-hover);color:var(--w-title)}
+.ibtn:active{background:var(--w-icon-press);transform:scale(.94)}
+.ibtn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--w-bg-a),0 0 0 3.5px rgba(43,50,64,.34)}
+.ibtn svg{display:block;pointer-events:none}
+
+/* 视图 */
+.win-body{position:relative;height:294px;padding:0 20px}
+.view{
+  position:absolute;inset:0;padding:0 20px;
+  display:flex;flex-direction:column;
+  opacity:0;visibility:hidden;transform:translateX(5px);
+  transition:opacity .15s ease,transform .22s cubic-bezier(.32,.72,0,1),visibility .15s;
+}
+.win[data-view="pair"] .view-pair{opacity:1;visibility:visible;transform:none}
+.win[data-view="settings"] .view-settings{opacity:1;visibility:visible;transform:none}
+
+/* 二维码 */
+.view-pair{justify-content:center;padding-bottom:18px}
+.qr-tile{
+  width:228px;height:228px;flex:none;align-self:center;
+  border-radius:10px;background:var(--w-tile);
+  box-shadow:0 0 0 1px var(--w-tile-line),0 1px 3px rgba(16,24,40,.055);
+  display:grid;place-items:center;
+}
+.qr-tile svg{display:block;shape-rendering:crispEdges}
+.win.theme-dark .qr-tile{
+  box-shadow:0 0 0 1px rgba(255,255,255,.08),0 6px 16px -6px rgba(0,0,0,.55);
+}
+
+/* 设置 */
+.view-settings{padding:20px 20px 20px}
+.set-rows{display:flex;flex-direction:column;gap:34px}
+.field-top{display:flex;align-items:baseline;justify-content:space-between;line-height:1.4}
+.field-label{font-size:13px;font-weight:500;color:var(--w-text)}
+.field-value{
+  font-size:15px;font-weight:600;color:var(--w-title);letter-spacing:-.01em;
+  font-variant-numeric:tabular-nums;
+}
+.slider{margin-top:8px;display:flex;align-items:center;height:18px}
+input[type="range"]{
+  -webkit-appearance:none;appearance:none;
+  width:100%;height:18px;margin:0;padding:0;background:transparent;
+  cursor:pointer;outline:none;
+}
+input[type="range"]::-webkit-slider-runnable-track{
+  height:4px;border-radius:2px;
+  background:linear-gradient(to right,
+    var(--w-btn) 0%,var(--w-btn) var(--fill,20%),
+    var(--w-track) var(--fill,20%),var(--w-track) 100%);
+}
+input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;
+  width:18px;height:18px;border-radius:50%;margin-top:-7px;
+  background:#fff;border:1.5px solid var(--w-btn);
+  box-shadow:0 1px 2px rgba(16,24,40,.22),0 2px 5px rgba(16,24,40,.09);
+  transition:transform .13s ease,box-shadow .13s ease,border-width .13s ease;
+}
+input[type="range"]:hover::-webkit-slider-thumb{transform:scale(1.07)}
+input[type="range"]:active::-webkit-slider-thumb{transform:scale(.97);border-width:4px}
+input[type="range"]:focus-visible::-webkit-slider-thumb{
+  box-shadow:0 0 0 3px rgba(43,50,64,.15),0 1px 2px rgba(16,24,40,.2);
+}
+input[type="range"]::-moz-range-track{height:4px;border-radius:2px;background:var(--w-track)}
+input[type="range"]::-moz-range-progress{height:4px;border-radius:2px;background:var(--w-btn)}
+input[type="range"]::-moz-range-thumb{
+  width:15px;height:15px;border-radius:50%;background:#fff;
+  border:1.5px solid var(--w-btn);box-shadow:0 1px 2px rgba(16,24,40,.22);
+}
+.ticks{
+  display:flex;justify-content:space-between;margin-top:4px;
+  font-size:11px;line-height:16px;color:var(--w-faint);font-variant-numeric:tabular-nums;
+}
+.view-settings .btn{margin-top:auto}
+
+/* 主按钮 */
+.btn{
+  appearance:none;border:0;cursor:pointer;
+  width:100%;height:40px;border-radius:10px;
+  font:500 13.5px/1 var(--sans);letter-spacing:.02em;
+  color:var(--w-btn-fg);background:var(--w-btn);
+  box-shadow:
+    inset 0 1px 0 var(--w-btn-hi),
+    inset 0 -1px 0 rgba(0,0,0,.15),
+    0 1px 2px rgba(16,24,40,.2),
+    0 0 0 1px var(--w-btn-ring);
+  transition:background .13s ease,transform .1s ease,box-shadow .13s ease;
+  display:grid;place-items:center;
+}
+.btn:hover{background:var(--w-btn-hover)}
+.btn:active{
+  background:var(--w-btn-press);transform:translateY(.5px);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05),inset 0 2px 4px rgba(0,0,0,.16),0 0 0 1px var(--w-btn-ring);
+}
+.btn:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 2px var(--w-bg-a),0 0 0 4px rgba(43,50,64,.28),inset 0 1px 0 var(--w-btn-hi);
+}
+
+/* ---------- 前后对比 ---------- */
+.compare{
+  display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);
+  margin-top:12px;border-radius:16px;overflow:hidden;
+  box-shadow:0 0 0 1px var(--line);
+}
+.cell{padding:44px 24px 32px;background:#FBFBFC;display:flex;flex-direction:column;align-items:center}
+.cell .shot{
+  width:282px;height:338px;border-radius:12px;position:relative;
+  background:#F1F3F5;display:grid;place-items:center;
+}
+.cell img{width:282px;height:338px;border-radius:10px;display:block}
+
+/* 原版复刻：直角 10px 圆角、1px 边、无阴影、二维码贴上部 */
+.win-old{
+  position:relative;width:282px;height:338px;flex:none;
+  border-radius:10px;background:#fff;
+  box-shadow:0 0 0 1px #E1E2E7;
+  overflow:hidden;
+}
+.win-old .hd{
+  height:42px;display:flex;align-items:center;padding:0 10px 0 16px;
+  font-size:12px;font-weight:500;color:#24272D;
+}
+.win-old .hd .t{flex:1}
+.win-old .hd svg{display:block}
+.win-old .hd .g,.win-old .hd .c{
+  width:30px;height:30px;display:grid;place-items:center;color:#313844;
+}
+.win-old .qr{position:absolute;left:42px;top:69px;width:198px;height:198px}
+.win-old .qr svg{width:198px;height:198px;display:block;shape-rendering:crispEdges}
+.cell .cap{margin-top:22px;font-size:12px;color:var(--ink-3);display:flex;align-items:center;gap:8px}
+.cell .cap b{font-weight:600;color:var(--ink);font-size:12.5px}
+.cell .cap .tag{
+  font:10px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;
+  padding:3px 5px;border-radius:4px;background:#F0F1F4;color:#8A909B;
+}
+.cell .cap .tag.new{background:#EEF2F9;color:#3B4E6E}
+
+/* ---------- 分区 ---------- */
+.sec{margin-top:96px;padding-top:36px;border-top:1px solid var(--line)}
+.sec-head{display:flex;align-items:baseline;gap:14px}
+.sec-num{font:10.5px/1 var(--mono);letter-spacing:.14em;color:var(--ink-3)}
+.sec h2{margin:0;font-size:18px;font-weight:600;letter-spacing:-.015em}
+.sec .lede{margin:12px 0 0;max-width:62ch;font-size:13px;line-height:1.85;color:var(--ink-2)}
+
+/* 规格表 */
+.specs{margin-top:34px;display:grid;grid-template-columns:repeat(3,1fr);gap:48px}
+.specs h3{
+  margin:0 0 14px;font-size:11px;font-weight:500;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3);
+}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #F4F5F7;font-size:12px}
+.kv:last-child{border-bottom:0}
+.kv span{color:var(--ink-2)}
+.kv b{font:11.5px/1.6 var(--mono);font-weight:400;color:var(--ink);letter-spacing:.01em;text-align:right}
+
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+.chip{
+  display:flex;align-items:center;gap:7px;padding:5px 9px 5px 5px;
+  border-radius:7px;background:#F8F9FA;font-size:11.5px;color:var(--ink-2);
+}
+.chip i{width:18px;height:18px;border-radius:5px;box-shadow:inset 0 0 0 1px rgba(16,24,40,.07)}
+.chip code{font:10.5px/1 var(--mono);color:var(--ink-3)}
+
+/* 实现表 */
+table.impl{
+  width:100%;border-collapse:collapse;margin-top:34px;font-size:12.5px;
+}
+table.impl th{
+  text-align:left;padding:0 0 12px;font:10.5px/1 var(--mono);
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:400;
+  border-bottom:1px solid var(--line);
+}
+table.impl td{padding:16px 20px 16px 0;border-bottom:1px solid #F4F5F7;vertical-align:top;line-height:1.75;color:var(--ink-2)}
+table.impl td:first-child{color:var(--ink);font-weight:500}
+table.impl tr:last-child td{border-bottom:0}
+table.impl code{font:11px/1.5 var(--mono);background:#F6F7F9;padding:1.5px 5px;border-radius:4px;color:#3C4657}
+.cost{font:10.5px/1 var(--mono);padding:3px 6px;border-radius:4px;white-space:nowrap}
+.cost.low{background:#F0F7F3;color:#2F6E4C}
+.cost.mid{background:#FDF6EA;color:#8A6316}
+
+.callout{
+  margin-top:34px;padding:20px 24px;border-radius:12px;background:#FAFAFB;
+  box-shadow:inset 0 0 0 1px var(--line);
+  font-size:12.5px;line-height:1.85;color:var(--ink-2);
+}
+.callout b{color:var(--ink)}
+.callout p{margin:0}
+.callout p + p{margin-top:9px}
+
+footer{
+  margin-top:110px;padding-top:24px;border-top:1px solid var(--line);
+  display:flex;justify-content:space-between;gap:20px;
+  font-size:11.5px;color:var(--ink-3);
+}
+
+@media (max-width:880px){
+  .wrap{padding:0 24px 90px}
+  .specs{grid-template-columns:1fr;gap:32px}
+  .compare{grid-template-columns:1fr}
+  .stage-panel{padding:44px 16px}
+  .intro h1{font-size:26px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <span class="mark">
+      <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+        <rect x="1.2" y="3.4" width="9.6" height="5.2" rx="1.4" stroke="#fff" stroke-width="1.1"/>
+        <path d="M3.3 5.7h.01M4.9 5.7h.01M6.5 5.7h.01M8.1 5.7h.01" stroke="#fff" stroke-width="1.2" stroke-linecap="round"/>
+      </svg>
+    </span>
+    <span class="name">掌键</span>
+    <span class="sub">桌面端窗口</span>
+    <span class="meta">282 × 338 · GDI</span>
+  </div>
+
+  <div class="intro">
+    <h1>把窗口做得安静一点，<br>它会显得更贵。</h1>
+    <p>
+      窗口里只有一件事——扫码。所以这一版不加功能、不加文案，只重做三处：
+      边缘（发丝线 + 分层阴影）、二维码（独立瓦片 + 静区）、控件（圆角、悬停按下反馈、去掉系统虚线框）。
+      下面每一处都能用现有 GDI 代码画出来。
+    </p>
+  </div>
+
+  <div class="toolbar">
+    <span class="label">视图</span>
+    <div class="seg" role="group" aria-label="视图">
+      <button type="button" data-view-btn="pair" aria-pressed="true">扫码</button>
+      <button type="button" data-view-btn="settings" aria-pressed="false">设置</button>
+    </div>
+    <span class="label" style="margin-left:18px">主题</span>
+    <div class="seg" role="group" aria-label="主题">
+      <button type="button" data-theme-btn="light" aria-pressed="true">浅色</button>
+      <button type="button" data-theme-btn="dark" aria-pressed="false">深色</button>
+    </div>
+    <span class="label" style="margin-left:18px">缩放</span>
+    <div class="seg" role="group" aria-label="缩放">
+      <button type="button" data-zoom="1" aria-pressed="false">1×</button>
+      <button type="button" data-zoom="1.5" aria-pressed="true">1.5×</button>
+      <button type="button" data-zoom="2" aria-pressed="false">2×</button>
+    </div>
+    <span class="spacer"></span>
+    <span class="label" style="text-transform:none;letter-spacing:.02em">点齿轮进入设置页</span>
+  </div>
+
+  <div class="stage-panel">
+    <div class="stage" id="stage" style="--z:1.5">
+      <div class="win" id="win" data-view="pair">
+
+        <div class="win-hd">
+          <button class="ibtn hd-back" id="btnBack" type="button" aria-label="返回">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9.6 3.6L5.2 8l4.4 4.4"/>
+            </svg>
+          </button>
+          <div class="title" id="winTitle">掌键</div>
+          <button class="ibtn" id="btnGear" type="button" aria-label="设置">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6.6 2.2h2.8l.35 1.6 1.2.7 1.55-.55 1.4 2.42-1.2 1.1v1.4l1.2 1.1-1.4 2.42-1.55-.55-1.2.7-.35 1.6H6.6l-.35-1.6-1.2-.7-1.55.55-1.4-2.42 1.2-1.1v-1.4l-1.2-1.1 1.4-2.42 1.55.55 1.2-.7z"/>
+              <circle cx="8" cy="8" r="1.9"/>
+            </svg>
+          </button>
+          <button class="ibtn" id="btnClose" type="button" aria-label="关闭">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+              <path d="M2.75 2.75l10.5 10.5M13.25 2.75l-10.5 10.5"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="win-body">
+
+          <div class="view view-pair">
+            <div class="qr-tile" id="qrTile"></div>
+          </div>
+
+          <div class="view view-settings">
+            <div class="set-rows">
+              <div class="field">
+                <div class="field-top">
+                  <span class="field-label">鼠标灵敏度</span>
+                  <span class="field-value" id="valMouse">1.0×</span>
+                </div>
+                <div class="slider">
+                  <input type="range" id="rngMouse" min="50" max="300" step="10" value="100" aria-label="鼠标灵敏度">
+                </div>
+                <div class="ticks"><span>0.5×</span><span>3×</span></div>
+              </div>
+
+              <div class="field">
+                <div class="field-top">
+                  <span class="field-label">滚动倍率</span>
+                  <span class="field-value" id="valScroll">1.0×</span>
+                </div>
+                <div class="slider">
+                  <input type="range" id="rngScroll" min="50" max="300" step="10" value="100" aria-label="滚动倍率">
+                </div>
+                <div class="ticks"><span>0.5×</span><span>3×</span></div>
+              </div>
+            </div>
+
+            <button class="btn" id="btnDone" type="button">完成</button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 前后对比 -->
+  <div class="compare">
+    <div class="cell">
+      <div class="shot">
+        <div class="win-old">
+          <div class="hd">
+            <span class="t">掌键</span>
+            <span class="g">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6.6 2.2h2.8l.35 1.6 1.2.7 1.55-.55 1.4 2.42-1.2 1.1v1.4l1.2 1.1-1.4 2.42-1.55-.55-1.2.7-.35 1.6H6.6l-.35-1.6-1.2-.7-1.55.55-1.4-2.42 1.2-1.1v-1.4l-1.2-1.1 1.4-2.42 1.55.55 1.2-.7z"/>
+                <circle cx="8" cy="8" r="1.9"/>
+              </svg>
+            </span>
+            <span class="c">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+                <path d="M1.9 1.9l12.2 12.2M14.1 1.9l-12.2 12.2"/>
+              </svg>
+            </span>
+          </div>
+          <div class="qr clone-qr"></div>
+        </div>
+      </div>
+      <div class="cap"><span class="tag">Before</span><b>现在</b>直角、无阴影、二维码靠上</div>
+    </div>
+
+    <div class="cell">
+      <div class="shot">
+        <div class="stage" style="--z:1">
+          <div class="win" data-view="pair">
+            <div class="win-hd">
+              <div class="title">掌键</div>
+              <button class="ibtn" type="button" aria-label="设置">
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M6.6 2.2h2.8l.35 1.6 1.2.7 1.55-.55 1.4 2.42-1.2 1.1v1.4l1.2 1.1-1.4 2.42-1.55-.55-1.2.7-.35 1.6H6.6l-.35-1.6-1.2-.7-1.55.55-1.4-2.42 1.2-1.1v-1.4l-1.2-1.1 1.4-2.42 1.55.55 1.2-.7z"/>
+                  <circle cx="8" cy="8" r="1.9"/>
+                </svg>
+              </button>
+              <button class="ibtn" type="button" aria-label="关闭">
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                  <path d="M2.75 2.75l10.5 10.5M13.25 2.75l-10.5 10.5"/>
+                </svg>
+              </button>
+            </div>
+            <div class="win-body">
+              <div class="view view-pair" style="opacity:1;visibility:visible;transform:none">
+                <div class="qr-tile clone-qr"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="cap"><span class="tag new">After</span><b>这一版</b>14px 圆角、三层阴影、贴边瓦片</div>
+    </div>
+  </div>
+
+  <!-- 规格 -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">01</span><h2>规格</h2></div>
+    <p class="lede">全部是常量。改一处，整窗一起变——不要把这些数字散落在绘制函数里。</p>
+
+    <div class="specs">
+      <div>
+        <h3>几何</h3>
+        <div class="kv"><span>窗口</span><b>282 × 338</b></div>
+        <div class="kv"><span>阴影留白</span><b>16</b></div>
+        <div class="kv"><span>圆角 · 窗口</span><b>14</b></div>
+        <div class="kv"><span>圆角 · 瓦片</span><b>10</b></div>
+        <div class="kv"><span>圆角 · 按钮</span><b>10</b></div>
+        <div class="kv"><span>顶栏高</span><b>44</b></div>
+        <div class="kv"><span>二维码瓦片</span><b>228</b></div>
+        <div class="kv"><span>二维码 / 模块</span><b>217 / 7</b></div>
+        <div class="kv"><span>内容边距</span><b>20</b></div>
+      </div>
+
+      <div>
+        <h3>字号</h3>
+        <div class="kv"><span>标题</span><b>13 / 600</b></div>
+        <div class="kv"><span>设置页标题</span><b>15 / 600</b></div>
+        <div class="kv"><span>字段名</span><b>13 / 500</b></div>
+        <div class="kv"><span>数值</span><b>15 / 600</b></div>
+        <div class="kv"><span>刻度</span><b>11 / 400</b></div>
+        <div class="kv"><span>字族</span><b>YaHei UI</b></div>
+      </div>
+
+      <div>
+        <h3>颜色</h3>
+        <div class="chips">
+          <span class="chip"><i style="background:#1F242C"></i>标题<code>#1F242C</code></span>
+          <span class="chip"><i style="background:#24272D"></i>正文<code>#24272D</code></span>
+          <span class="chip"><i style="background:#6B7280"></i>次要<code>#6B7280</code></span>
+          <span class="chip"><i style="background:#6E7683"></i>刻度<code>#6E7683</code></span>
+          <span class="chip"><i style="background:#2B3240"></i>主色<code>#2B3240</code></span>
+          <span class="chip"><i style="background:#E2E5EA"></i>轨道<code>#E2E5EA</code></span>
+          <span class="chip"><i style="background:#EBECEF"></i>发丝线<code>#EBECEF</code></span>
+          <span class="chip"><i style="background:#FAFAFB"></i>窗口底<code>#FAFAFB</code></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 实现 -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">02</span><h2>落到 GDI 上</h2></div>
+    <p class="lede">
+      <code style="font:11px var(--mono);background:#F6F7F9;padding:2px 5px;border-radius:4px">card.c</code>
+      已经是逐像素 SDF 合成，圆角抗锯齿和阴影都是现成的。改造不需要引入依赖。
+    </p>
+
+    <table class="impl">
+      <thead>
+        <tr><th style="width:150px">效果</th><th>做法</th><th style="width:78px">成本</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>让阴影可见</td>
+          <td>现在 <code>margin</code> 恒为 0，阴影全被窗口自己裁掉。改成 <code>margin = scale_px(16, dpi)</code>，窗口宽高各加 32。</td>
+          <td><span class="cost low">1 行</span></td>
+        </tr>
+        <tr>
+          <td>分层阴影</td>
+          <td>现有单段 <code>falloff² × 60</code> 换成两段：贴边 1.5px 内 alpha 到 40，外圈按 <code>(1 − d/margin)² × 26</code> 衰减。</td>
+          <td><span class="cost low">局部</span></td>
+        </tr>
+        <tr>
+          <td>发丝边</td>
+          <td>代码里已有 <code>distance &gt; -1.25</code> 的判断（<code>#D8D8DE</code>）。换成 <code>#EBECEF</code> 并按距离做 alpha 渐变，边缘就柔了。</td>
+          <td><span class="cost low">1 行</span></td>
+        </tr>
+        <tr>
+          <td>顶部内高光</td>
+          <td>同一次 SDF 循环里，<code>-2 &lt; d &lt; 0</code> 且 <code>y &lt; 40</code> 的像素叠白色 alpha 0.55，模拟光源。</td>
+          <td><span class="cost low">局部</span></td>
+        </tr>
+        <tr>
+          <td>二维码瓦片</td>
+          <td><code>rounded_rect_sdf</code> 画 228×228 白底 + 1px 边，二维码保持纯黑 <code>#101317</code>、静区 4 模块，只在外面加框，不碰模块本身。</td>
+          <td><span class="cost low">低</span></td>
+        </tr>
+        <tr>
+          <td>图标</td>
+          <td>最省事：<code>Segoe MDL2 Assets</code> 字形，齿轮 <code>U+E713</code>、关闭 <code>U+E8BB</code>、返回 <code>U+E72B</code>，15px，<code>#5B6472</code>。</td>
+          <td><span class="cost low">低</span></td>
+        </tr>
+        <tr>
+          <td>去掉虚线框</td>
+          <td>那条虚线是原生 <code>msctls_trackbar</code> 的焦点框。必须藏掉原生控件，改用盘面上已有的 <code>draw_slider_thumb</code>，在 <code>WM_LBUTTONDOWN/MOUSEMOVE</code> 里自己算百分比。</td>
+          <td><span class="cost mid">中</span></td>
+        </tr>
+        <tr>
+          <td>字体</td>
+          <td><code>CreateFontW</code> 的 face 传 <code>L"Microsoft YaHei UI"</code>；现在依赖系统默认 face，字重不稳。</td>
+          <td><span class="cost low">1 行</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      <p><b>二维码放大靠模块尺寸，不靠拉大画布。</b>模块 6 → 7px、静区 4 → 3 模块，<code style="font:11px var(--mono)">217 / (25 + 6)</code> 正好整除，实际绘制 <b>217px</b>，黑色码块从 150 涨到 175。三个常量：<code style="font:11px var(--mono)">CARD_QR_TARGET_PX</code> 230 → 217、<code style="font:11px var(--mono)">CARD_QUIET_MODULES</code> 4 → 3。瓦片内边距补回 5px，等效静区仍是 4 个模块。</p>
+      <p><b>两个坑。</b>二维码区域不要做半透明、渐变或圆角裁切——静区一旦被破坏，扫码失败率会明显上升，质感一律做在外框。</p>
+      <p>加了 16px 阴影留白后，托盘定位（<code style="font:11px var(--mono)">card.c:833</code>）要用 <code style="font:11px var(--mono)">card_w + margin × 2</code> 重算，否则贴边会差 16px。</p>
+    </div>
+  </section>
+
+  <footer>
+    <span>掌键 · 桌面窗口质感 v2</span>
+    <span>282 × 338 · Win32 / GDI · 96dpi 基准</span>
+  </footer>
+</div>
+
+<script>
+/* 示意二维码：25 模块，新稿 7px 模块 / 3 模块静区（217），原版 6px / 4 模块（198） */
+(function(){
+  const N = 25;
+  function make(seed, Q, M){
+    let s = seed >>> 0;
+    const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+    const g = Array.from({length:N}, () => Array(N).fill(null));
+
+    const finder = (ox, oy) => {
+      for (let y = 0; y < 7; y++) for (let x = 0; x < 7; x++){
+        const edge = x === 0 || x === 6 || y === 0 || y === 6;
+        const core = x >= 2 && x <= 4 && y >= 2 && y <= 4;
+        g[oy+y][ox+x] = edge || core;
+      }
+    };
+    finder(0,0); finder(N-7,0); finder(0,N-7);
+
+    for (let i = 0; i < 8; i++){
+      if (g[7][i] === null) g[7][i] = false;
+      if (g[i][7] === null) g[i][7] = false;
+      if (g[7][N-1-i] === null) g[7][N-1-i] = false;
+      if (g[N-8][i] === null) g[N-8][i] = false;
+      if (g[i][N-8] === null) g[i][N-8] = false;
+    }
+    for (let i = 8; i < N-8; i++){
+      const v = i % 2 === 0;
+      if (g[6][i] === null) g[6][i] = v;
+      if (g[i][6] === null) g[i][6] = v;
+    }
+    for (let y = 0; y < 5; y++) for (let x = 0; x < 5; x++){
+      const edge = x === 0 || x === 4 || y === 0 || y === 4;
+      const core = x === 2 && y === 2;
+      g[16+y][16+x] = edge || core;
+    }
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++)
+      if (g[y][x] === null) g[y][x] = rnd() > 0.48;
+
+    let rects = '';
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++)
+      if (g[y][x]) rects += `<rect x="${(x+Q)*M}" y="${(y+Q)*M}" width="${M}" height="${M}"/>`;
+
+    const side = (N + Q*2) * M;
+    return `<svg width="${side}" height="${side}" viewBox="0 0 ${side} ${side}" fill="#101317" aria-label="二维码示意">${rects}</svg>`;
+  }
+  const fresh = make(20261119, 3, 7);   /* 217px */
+  const old   = make(20261119, 4, 6);   /* 198px，还原现在的构建 */
+  const tile = document.getElementById('qrTile');
+  if (tile) tile.innerHTML = fresh;
+  document.querySelectorAll('.clone-qr').forEach(el => {
+    el.innerHTML = el.closest('.win-old') ? old : fresh;
+  });
+})();
+
+/* 交互 */
+(function(){
+  const win = document.getElementById('win');
+  const stage = document.getElementById('stage');
+  const gear = document.getElementById('btnGear');
+  const title = document.getElementById('winTitle');
+
+  function setView(v){
+    win.dataset.view = v;
+    /* 只有一条导航栏：设置页把齿轮换成返回，标题跟着换，不另起一行 */
+    gear.style.display = v === 'settings' ? 'none' : 'grid';
+    title.textContent = v === 'settings' ? '设置' : '掌键';
+    document.querySelectorAll('[data-view-btn]').forEach(b =>
+      b.setAttribute('aria-pressed', String(b.dataset.viewBtn === v)));
+  }
+  document.getElementById('btnGear').addEventListener('click', () => setView('settings'));
+  document.getElementById('btnBack').addEventListener('click', () => setView('pair'));
+  document.getElementById('btnDone').addEventListener('click', () => setView('pair'));
+  document.querySelectorAll('[data-view-btn]').forEach(b =>
+    b.addEventListener('click', () => setView(b.dataset.viewBtn)));
+
+  document.querySelectorAll('[data-zoom]').forEach(b =>
+    b.addEventListener('click', () => {
+      stage.style.setProperty('--z', b.dataset.zoom);
+      document.querySelectorAll('[data-zoom]').forEach(o =>
+        o.setAttribute('aria-pressed', String(o === b)));
+    }));
+
+  document.querySelectorAll('[data-theme-btn]').forEach(b =>
+    b.addEventListener('click', () => {
+      win.classList.toggle('theme-dark', b.dataset.themeBtn === 'dark');
+      document.querySelectorAll('[data-theme-btn]').forEach(o =>
+        o.setAttribute('aria-pressed', String(o === b)));
+    }));
+
+  function bindRange(id, outId){
+    const input = document.getElementById(id), out = document.getElementById(outId);
+    const sync = () => {
+      const p = (input.value - input.min) / (input.max - input.min) * 100;
+      input.style.setProperty('--fill', p + '%');
+      out.textContent = (Number(input.value) / 100).toFixed(1) + '×';
+    };
+    input.addEventListener('input', sync);
+    sync();
+  }
+  bindRange('rngMouse', 'valMouse');
+  bindRange('rngScroll', 'valScroll');
+
+  /* 便于截图 / 分享：?view=settings&theme=dark&z=2 */
+  const q = new URLSearchParams(location.search);
+  if (q.get('view') === 'settings') setView('settings');
+  if (q.get('theme') === 'dark') {
+    win.classList.add('theme-dark');
+    document.querySelectorAll('[data-theme-btn]').forEach(b =>
+      b.setAttribute('aria-pressed', String(b.dataset.themeBtn === 'dark')));
+  }
+  if (q.get('z')) {
+    stage.style.setProperty('--z', q.get('z'));
+    document.querySelectorAll('[data-zoom]').forEach(b =>
+      b.setAttribute('aria-pressed', String(b.dataset.zoom === q.get('z'))));
+  }
+})();
+</script>
+</body>
+</html>

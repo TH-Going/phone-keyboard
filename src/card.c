@@ -1,6 +1,17 @@
 /*
  * Compact main window: GDI painting with native buttons and trackbars.
  * QR modules use integer pixels; the window follows per-monitor DPI.
+ *
+ * Visual spec lives in docs/window-design.html:
+ *   - 282 x 338 card, 14 px corners, 1 px hairline rim, vertical surface
+ *     gradient and a soft inner highlight along the top edge
+ *   - the code sits on a 228 px white tile (10 px corners, 1 px edge); the
+ *     matrix itself stays 217 px so modules are 7 px and the quiet zone is
+ *     three modules plus the tile padding
+ *   - owner drawn controls: 28 px icon buttons, a 40 px primary button and a
+ *     4 px track with an antialiased 18 px thumb
+ *   - no painted shadow: at this size it reads as a grey outline, so the card
+ *     separates itself with the hairline rim and the surface gradient only
  */
 #include "app.h"
 #include "qrcodegen.h"
@@ -8,12 +19,43 @@
 #include <windowsx.h>
 
 #pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "msimg32.lib")
 
 #define CARD_WIDTH_PX 282
 #define CARD_HEIGHT_PX 338
-#define CARD_QR_TARGET_PX 230
-#define CARD_QUIET_MODULES 4
-#define CARD_RADIUS_PX 10
+#define CARD_RADIUS_PX 14
+#define CARD_DWM_RADIUS_PX 8
+#define CARD_HEADER_PX 44
+#define CARD_TILE_PX 236
+#define CARD_TILE_RADIUS_PX 10
+#define CARD_TILE_PAD_PX 3
+#define CARD_QUIET_MODULES 2
+
+/* Header controls sit on a 44 px band; 28 px targets keep a 10 px inset. */
+#define CARD_ICON_PX 28
+#define CARD_ICON_Y 8
+#define CARD_SETTINGS_X 214
+#define CARD_CLOSE_X 244
+#define CARD_BACK_X 10
+
+/* Settings rows. Field one starts under the header at y = 64. */
+#define FIELD_ONE_Y 64
+#define FIELD_TWO_Y 165
+#define FIELD_TEXT_H 21
+#define FIELD_VALUE_W 120
+#define FIELD_TICKS_DY 51
+#define FIELD_TRACK_DY 38
+#define TRACK_WINDOW_H 30
+/* The thumb is centred on the track end, so the child window needs to be
+ * wider than the track or half the thumb is clipped at either extreme. */
+#define TRACK_PAD_PX 12
+#define DONE_X 20
+#define DONE_Y 278
+#define DONE_W 242
+#define DONE_H 40
+
+#define UI_FACE L"Microsoft YaHei UI"   /* CJK */
+#define UI_FACE_NUM L"Segoe UI"          /* digits and the multiplication sign */
 
 #define CARD_ID_SETTINGS 1001
 #define CARD_ID_CLOSE 1002
@@ -21,6 +63,29 @@
 #define CARD_ID_DONE 1004
 #define CARD_ID_MOUSE 1005
 #define CARD_ID_SCROLL 1006
+
+/* Palette ------------------------------------------------------------- */
+#define COL_SURFACE_TOP_R 0xFB
+#define COL_SURFACE_TOP_G 0xFC
+#define COL_SURFACE_TOP_B 0xFD
+#define COL_SURFACE_BOT_R 0xF3
+#define COL_SURFACE_BOT_G 0xF5
+#define COL_SURFACE_BOT_B 0xF7
+
+#define COL_HAIRLINE RGB(0xE6, 0xE8, 0xEC)
+#define COL_TILE_LINE RGB(0xE9, 0xEA, 0xEE)
+#define COL_TITLE RGB(0x1F, 0x24, 0x2C)
+#define COL_TEXT RGB(0x24, 0x27, 0x2D)
+#define COL_TICKS RGB(0x6E, 0x76, 0x83)
+#define COL_ICON RGB(0x5B, 0x64, 0x72)
+#define COL_ICON_HOT RGB(0x1F, 0x24, 0x2C)
+#define COL_ACCENT RGB(0x2B, 0x32, 0x40)
+#define COL_ACCENT_PRESS RGB(0x1C, 0x21, 0x2B)
+#define COL_TRACK RGB(0xE2, 0xE5, 0xEA)
+#define COL_HOVER_BG RGB(0xF1, 0xF2, 0xF5)
+#define COL_PRESS_BG RGB(0xE7, 0xE9, 0xED)
+#define COL_QR RGB(0x10, 0x13, 0x17)
+#define COL_THUMB_RING RGB(0x45, 0x4E, 0x5E)
 
 typedef struct {
     HDC dc;
@@ -43,17 +108,37 @@ typedef struct {
     int qr_px;        /* side length including the quiet zone */
     int qr_x;
     int qr_y;
+    int tile_x;
+    int tile_y;
+    int tile_px;
+    int tile_radius;
     bool connected;
 } CardLayout;
 
+typedef struct {
+    int red, green, blue;
+} CardColor;
+
 static CardSurface g_surface;
 static CardLayout g_layout;
+static bool g_corners_by_dwm;
 static struct {
     HWND settings, close, back, done, mouse, scroll;
     HFONT font;
     bool positioned;
     bool mouse_dirty, scroll_dirty;
+    int hot_id;
+    bool tracking[6];
 } g_controls;
+
+/* Cached antialiased slider thumb, rebuilt when the DPI changes. */
+static struct {
+    HDC dc;
+    HBITMAP bitmap;
+    void *bits;
+    int size;
+    int diameter;
+} g_thumb;
 
 /* ------------------------------------------------------------------ */
 /* Small math helpers                                                  */
@@ -100,6 +185,34 @@ static void store_pixel(unsigned char *pixels, int width, int x, int y,
     pixel[1] = (unsigned char)((green * alpha + 127) / 255);
     pixel[2] = (unsigned char)((red * alpha + 127) / 255);
     pixel[3] = (unsigned char)alpha;
+}
+
+/* Source-over onto a premultiplied BGRA buffer. */
+static void blend_pixel(unsigned char *pixels, int width, int x, int y,
+                        int red, int green, int blue, int alpha)
+{
+    if (alpha <= 0) {
+        return;
+    }
+    if (alpha > 255) {
+        alpha = 255;
+    }
+    int keep = 255 - alpha;
+    unsigned char *pixel = pixels + ((size_t)y * (size_t)width + (size_t)x) * 4;
+    pixel[0] = (unsigned char)((blue * alpha + pixel[0] * keep + 127) / 255);
+    pixel[1] = (unsigned char)((green * alpha + pixel[1] * keep + 127) / 255);
+    pixel[2] = (unsigned char)((red * alpha + pixel[2] * keep + 127) / 255);
+    pixel[3] = (unsigned char)((alpha * 255 + pixel[3] * keep + 127) / 255);
+}
+
+static CardColor surface_color(int y, int height)
+{
+    double t = height > 1 ? (double)y / (double)(height - 1) : 0.0;
+    CardColor color;
+    color.red = (int)(COL_SURFACE_TOP_R + (COL_SURFACE_BOT_R - COL_SURFACE_TOP_R) * t + 0.5);
+    color.green = (int)(COL_SURFACE_TOP_G + (COL_SURFACE_BOT_G - COL_SURFACE_TOP_G) * t + 0.5);
+    color.blue = (int)(COL_SURFACE_TOP_B + (COL_SURFACE_BOT_B - COL_SURFACE_TOP_B) * t + 0.5);
+    return color;
 }
 
 /* ------------------------------------------------------------------ */
@@ -153,22 +266,41 @@ static bool build_layout(App *app, int dpi, CardLayout *layout)
 
     layout->qr_modules = qrcodegen_getSize(qr);
     int total_modules = layout->qr_modules + CARD_QUIET_MODULES * 2;
-    int target = scale_px(CARD_QR_TARGET_PX, layout->dpi);
-    layout->module_px = target / total_modules;
+
+    /* DWM rounds at its own radius (about 8 px at 100%); the painted card has
+     * to match, otherwise the leftover corner pixels stay unpainted. */
+    layout->radius = scale_px(g_corners_by_dwm ? CARD_DWM_RADIUS_PX : CARD_RADIUS_PX,
+                              layout->dpi);
+    layout->card_w = layout->win_w = scale_px(CARD_WIDTH_PX, layout->dpi);
+    layout->card_h = layout->win_h = scale_px(CARD_HEIGHT_PX, layout->dpi);
+
+    /* The tile is centred in the space under the header, then lifted by
+     * giving the bottom 18 px back to the window. */
+    layout->tile_px = scale_px(CARD_TILE_PX, layout->dpi);
+    layout->tile_radius = scale_px(CARD_TILE_RADIUS_PX, layout->dpi);
+
+    /* Module size is derived from the tile, not from a fixed pixel target:
+     * the symbol version follows the pairing URL, and a fixed target turns a
+     * longer URL into smaller modules with a wide white mat around them. */
+    int available = layout->tile_px - 2 * scale_px(CARD_TILE_PAD_PX, layout->dpi);
+    layout->module_px = available / total_modules;
     if (layout->module_px < 1) {
         layout->module_px = 1;
     }
     layout->qr_px = layout->module_px * total_modules;
+    layout->tile_x = (layout->win_w - layout->tile_px) / 2;
+    int content = layout->win_h - scale_px(CARD_HEADER_PX, layout->dpi);
+    int lift = scale_px(18, layout->dpi);
+    int top_gap = (content - lift - layout->tile_px) / 2;
+    if (top_gap < 0) {
+        top_gap = 0;
+    }
+    layout->tile_y = scale_px(CARD_HEADER_PX, layout->dpi) + top_gap;
 
-    layout->radius = scale_px(CARD_RADIUS_PX, layout->dpi);
-    layout->card_w = layout->win_w = scale_px(CARD_WIDTH_PX, layout->dpi);
-    layout->card_h = layout->win_h = scale_px(CARD_HEIGHT_PX, layout->dpi);
-    layout->qr_x = (layout->win_w - layout->qr_px) / 2;
-    layout->qr_y = scale_px(53, layout->dpi) + (target - layout->qr_px) / 2;
+    layout->qr_x = layout->tile_x + (layout->tile_px - layout->qr_px) / 2;
+    layout->qr_y = layout->tile_y + (layout->tile_px - layout->qr_px) / 2;
 
     layout->connected = server_connected(app);
-
-    /* Keep the QR matrix around for painting by re-encoding from the same URL. */
     return true;
 }
 
@@ -182,8 +314,10 @@ static void paint_background(CardLayout *layout, unsigned char *pixels)
     double top = (double)layout->margin;
     double right = (double)(layout->margin + layout->card_w);
     double bottom = (double)(layout->margin + layout->card_h);
+    int highlight_rows = scale_px(46, layout->dpi);
 
     for (int y = 0; y < layout->win_h; y++) {
+        CardColor base = surface_color(y, layout->win_h);
         for (int x = 0; x < layout->win_w; x++) {
             double distance = rounded_rect_sdf(x + 0.5, y + 0.5, left, top, right, bottom,
                                                (double)layout->radius);
@@ -192,26 +326,61 @@ static void paint_background(CardLayout *layout, unsigned char *pixels)
                 coverage = 1.0;
             }
             if (coverage <= 0.0) {
-                /* Soft shadow below the card, fading out over a few pixels. */
-                if (distance > 0.5 && distance < (double)layout->margin + 2.0) {
-                    double falloff = 1.0 - (distance - 0.5) / ((double)layout->margin + 1.5);
-                    if (falloff > 0.0) {
-                        int alpha = (int)(falloff * falloff * 60.0);
-                        store_pixel(pixels, layout->win_w, x, y, 0, 0, 0, alpha);
-                    }
-                }
                 continue;
             }
-            int alpha = (int)(coverage * 255.0 + 0.5);
-            if (alpha > 255) {
-                alpha = 255;
-            }
+            int red = base.red, green = base.green, blue = base.blue;
+
             /* 1 px hairline just inside the edge, like a Win11 flyout. */
-            if (distance > -1.25) {
-                store_pixel(pixels, layout->win_w, x, y, 0xD8, 0xD8, 0xDE, alpha);
-            } else {
-                store_pixel(pixels, layout->win_w, x, y, 0xFF, 0xFF, 0xFF, alpha);
+            if (distance > -1.6) {
+                red = GetRValue(COL_HAIRLINE);
+                green = GetGValue(COL_HAIRLINE);
+                blue = GetBValue(COL_HAIRLINE);
             }
+
+            /* Soft light from above: fades out over the top 46 px. It starts
+             * inside the hairline so the 1 px rim still reads at the top. */
+            if (y < highlight_rows && distance > -6.0 && distance <= -1.6) {
+                double fade = 1.0 - (double)y / (double)highlight_rows;
+                double lift = 0.62 * fade;
+                red = (int)(red + (255 - red) * lift);
+                green = (int)(green + (255 - green) * lift);
+                blue = (int)(blue + (255 - blue) * lift);
+            }
+
+            store_pixel(pixels, layout->win_w, x, y, red, green, blue,
+                        (int)(coverage * 255.0 + 0.5));
+        }
+    }
+}
+
+static void paint_tile(CardLayout *layout, unsigned char *pixels)
+{
+    double left = (double)layout->tile_x;
+    double top = (double)layout->tile_y;
+    double right = left + layout->tile_px;
+    double bottom = top + layout->tile_px;
+    double radius = (double)layout->tile_radius;
+    int line_r = GetRValue(COL_TILE_LINE);
+    int line_g = GetGValue(COL_TILE_LINE);
+    int line_b = GetBValue(COL_TILE_LINE);
+
+    for (int y = layout->tile_y - 2; y < layout->tile_y + layout->tile_px + 2; y++) {
+        if (y < 0 || y >= layout->win_h) continue;
+        for (int x = layout->tile_x - 2; x < layout->tile_x + layout->tile_px + 2; x++) {
+            if (x < 0 || x >= layout->win_w) continue;
+            double distance = rounded_rect_sdf(x + 0.5, y + 0.5, left, top, right, bottom, radius);
+            double coverage = 0.5 - distance;
+            if (coverage <= 0.0) continue;
+            if (coverage > 1.0) coverage = 1.0;
+
+            int red = 255, green = 255, blue = 255;
+            if (distance > -1.4) {
+                red = line_r;
+                green = line_g;
+                blue = line_b;
+            }
+            blend_pixel(pixels, layout->win_w, x, y, red, green, blue,
+                        (int)(coverage * 255.0 + 0.5));
         }
     }
 }
@@ -236,7 +405,7 @@ static void paint_qr(CardLayout *layout, HDC dc, App *app)
         return;
     }
 
-    HBRUSH brush = CreateSolidBrush(RGB(0x0B, 0x0B, 0x0C));
+    HBRUSH brush = CreateSolidBrush(COL_QR);
     if (!brush) {
         return;
     }
@@ -266,13 +435,22 @@ static RECT scaled_rect(CardLayout *layout, int x, int y, int width, int height)
 }
 
 static void draw_text(CardLayout *layout, HDC dc, const wchar_t *text, RECT rect,
-                      int size, int weight, COLORREF color, UINT align)
+                      int size, int weight, COLORREF color, UINT align, COLORREF background,
+                      const wchar_t *face)
 {
     HFONT font = CreateFontW(-scale_px(size, layout->dpi), 0, 0, 0, weight,
                              0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS,
                              CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                             DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei UI");
+                             DEFAULT_PITCH | FF_DONTCARE, face);
     HGDIOBJ previous = font ? SelectObject(dc, font) : NULL;
+    /* ClearType blends its fringe against the background colour; leaving the
+     * DC default (white) muddies text sitting on the tinted surface. */
+    COLORREF back = background;
+    if (back == CLR_NONE) {
+        CardColor sampled = surface_color((rect.top + rect.bottom) / 2, layout->win_h);
+        back = RGB(sampled.red, sampled.green, sampled.blue);
+    }
+    SetBkColor(dc, back);
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, color);
     DrawTextW(dc, text, -1, &rect, align | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
@@ -282,14 +460,8 @@ static void draw_text(CardLayout *layout, HDC dc, const wchar_t *text, RECT rect
     }
 }
 
-static void draw_line(HDC dc, int x1, int y1, int x2, int y2)
-{
-    MoveToEx(dc, x1, y1, NULL);
-    LineTo(dc, x2, y2);
-}
-
 static void draw_system_icon(CardLayout *layout, HDC dc, RECT rect, const wchar_t *glyph,
-                             int font_size)
+                             int font_size, COLORREF color)
 {
     HFONT font = CreateFontW(-scale_px(font_size, layout->dpi), 0, 0, 0, FW_NORMAL,
                              0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS,
@@ -298,109 +470,303 @@ static void draw_system_icon(CardLayout *layout, HDC dc, RECT rect, const wchar_
     if (!font) return;
     HGDIOBJ old_font = SelectObject(dc, font);
     SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, RGB(0x24, 0x27, 0x2D));
+    SetTextColor(dc, color);
     DrawTextW(dc, glyph, 1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     SelectObject(dc, old_font);
     DeleteObject(font);
 }
 
-static void draw_slider_thumb(CardLayout *layout, HDC dc, int center_x, int center_y)
+/* Fill a rectangle with the surface gradient so owner drawn children blend
+ * into the window instead of showing a flat patch. y_offset is the child's
+ * top edge in card coordinates: child DCs start at zero, so sampling the
+ * gradient with the child's own y would paint the colour of the window top. */
+static void fill_surface(HDC dc, CardLayout *layout, RECT rect, int y_offset)
 {
-    int outer_size = scale_px(15, layout->dpi);
-    int outer_left = center_x - outer_size / 2;
-    int outer_top = center_y - outer_size / 2;
-    RECT outer = {outer_left, outer_top, outer_left + outer_size, outer_top + outer_size};
-    HBRUSH white = CreateSolidBrush(RGB(255, 255, 255));
-    HPEN border = CreatePen(PS_SOLID, 1, RGB(0xE6, 0xE8, 0xEC));
-    HGDIOBJ old_brush = SelectObject(dc, white);
-    HGDIOBJ old_pen = SelectObject(dc, border);
-    int outer_corner = scale_px(4, layout->dpi);
-    RoundRect(dc, outer.left, outer.top, outer.right, outer.bottom,
-              outer_corner, outer_corner);
-    SelectObject(dc, old_pen);
-    SelectObject(dc, old_brush);
-    DeleteObject(border);
-    DeleteObject(white);
-
-    int inner_size = scale_px(7, layout->dpi);
-    int inner_left = center_x - inner_size / 2;
-    int inner_top = center_y - inner_size / 2;
-    RECT inner = {inner_left, inner_top, inner_left + inner_size, inner_top + inner_size};
-    HBRUSH dark = CreateSolidBrush(RGB(0x31, 0x38, 0x44));
-    old_brush = SelectObject(dc, dark);
-    old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
-    int inner_corner = scale_px(2, layout->dpi);
-    RoundRect(dc, inner.left, inner.top, inner.right, inner.bottom,
-              inner_corner, inner_corner);
-    SelectObject(dc, old_pen);
-    SelectObject(dc, old_brush);
-    DeleteObject(dark);
+    for (int y = rect.top; y < rect.bottom; y++) {
+        CardColor color = surface_color(y + y_offset, layout->win_h);
+        HBRUSH brush = CreateSolidBrush(RGB(color.red, color.green, color.blue));
+        if (!brush) continue;
+        RECT row = {rect.left, y, rect.right, y + 1};
+        FillRect(dc, &row, brush);
+        DeleteObject(brush);
+    }
 }
 
-static void paint_button(CardLayout *layout, HDC dc, RECT rect, int id, UINT state)
+/* ------------------------------------------------------------------ */
+/* Antialiased rounded fills                                          */
+/* ------------------------------------------------------------------ */
+
+/* GDI's RoundRect() is not antialiased; a 10 px corner on the primary
+ * button shows obvious stair steps. Render the shape into a cached 32-bit
+ * buffer with a signed distance field and alpha blend it instead. */
+static struct {
+    HDC dc;
+    HBITMAP bitmap;
+    void *bits;
+    int width;
+    int height;
+    int radius;
+} g_round_cache;
+
+static void round_cache_release(void)
 {
-    bool primary = id == CARD_ID_DONE;
-    COLORREF fill = primary ? RGB(0x31, 0x38, 0x44) :
-                    (state & ODS_SELECTED) ? RGB(0xF4, 0xF5, 0xF7) : RGB(255, 255, 255);
-    HBRUSH brush = CreateSolidBrush(fill);
-    HPEN border = CreatePen(PS_SOLID, 1, fill);
-    HGDIOBJ old_brush = SelectObject(dc, brush), old_pen = SelectObject(dc, border);
-    int radius = scale_px(6, layout->dpi);
-    RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom, radius, radius);
-    SelectObject(dc, old_pen);
-    DeleteObject(border);
-    if (primary) {
-        draw_text(layout, dc, L"完成", rect, 13, FW_NORMAL, RGB(255, 255, 255), DT_CENTER);
-    } else {
-        int cx = (rect.left + rect.right) / 2, cy = (rect.top + rect.bottom) / 2;
-        int half = scale_px(5, layout->dpi), span = scale_px(7, layout->dpi);
-        if (id == CARD_ID_CLOSE) {
-            /* The close glyph has a narrower font bounding box than the
-             * gear, so its point size is increased to match the visible
-             * icon bounds while keeping the same system font and stroke. */
-            draw_system_icon(layout, dc, rect, L"\xE711", 15);
-        } else if (id == CARD_ID_BACK) {
-            HPEN pen = CreatePen(PS_SOLID, scale_px(2, layout->dpi), RGB(0x31, 0x38, 0x44));
-            old_pen = SelectObject(dc, pen);
-            draw_line(dc, cx - span, cy, cx + span, cy);
-            draw_line(dc, cx - span, cy, cx - span + half, cy - half);
-            draw_line(dc, cx - span, cy, cx - span + half, cy + half);
-            SelectObject(dc, old_pen);
-            DeleteObject(pen);
-        } else {
-            draw_system_icon(layout, dc, rect, L"\xE713", 13);
+    if (g_round_cache.dc && g_round_cache.bitmap) {
+        SelectObject(g_round_cache.dc, GetStockObject(NULL_BRUSH));
+    }
+    if (g_round_cache.dc) DeleteDC(g_round_cache.dc);
+    if (g_round_cache.bitmap) DeleteObject(g_round_cache.bitmap);
+    memset(&g_round_cache, 0, sizeof(g_round_cache));
+}
+
+static bool round_cache_ensure(int width, int height, int radius)
+{
+    if (g_round_cache.bitmap && g_round_cache.width == width &&
+        g_round_cache.height == height && g_round_cache.radius == radius) {
+        return true;
+    }
+    round_cache_release();
+
+    BITMAPINFO info;
+    memset(&info, 0, sizeof(info));
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+
+    void *bits = NULL;
+    HBITMAP bitmap = CreateDIBSection(NULL, &info, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (!bitmap || !bits) {
+        if (bitmap) DeleteObject(bitmap);
+        return false;
+    }
+    HDC dc = CreateCompatibleDC(NULL);
+    if (!dc) {
+        DeleteObject(bitmap);
+        return false;
+    }
+    SelectObject(dc, bitmap);
+    g_round_cache.dc = dc;
+    g_round_cache.bitmap = bitmap;
+    g_round_cache.bits = bits;
+    g_round_cache.width = width;
+    g_round_cache.height = height;
+    g_round_cache.radius = radius;
+    return true;
+}
+
+/* top_fill/ bottom_fill give a barely visible vertical shift, standing in for
+ * the 1 px highlight line that would need its own antialiasing pass. */
+static void fill_round_rect(HDC dc, RECT rect, int radius, COLORREF top_fill, COLORREF bottom_fill)
+{
+    int width = rect.right - rect.left;
+    int height = rect.bottom - rect.top;
+    if (width <= 0 || height <= 0 || width > 4096 || height > 4096) {
+        return;
+    }
+    if (!round_cache_ensure(width, height, radius)) {
+        return;
+    }
+    unsigned char *pixels = (unsigned char *)g_round_cache.bits;
+    memset(pixels, 0, (size_t)width * (size_t)height * 4);
+
+    int tr = GetRValue(top_fill), tg = GetGValue(top_fill), tb = GetBValue(top_fill);
+    int br = GetRValue(bottom_fill), bg = GetGValue(bottom_fill), bb = GetBValue(bottom_fill);
+    double corner = (double)radius;
+
+    for (int y = 0; y < height; y++) {
+        double t = height > 1 ? (double)y / (double)(height - 1) : 0.0;
+        int red = (int)(tr + (br - tr) * t + 0.5);
+        int green = (int)(tg + (bg - tg) * t + 0.5);
+        int blue = (int)(tb + (bb - tb) * t + 0.5);
+        for (int x = 0; x < width; x++) {
+            double distance = rounded_rect_sdf(x + 0.5, y + 0.5, 0.0, 0.0,
+                                               (double)width, (double)height, corner);
+            double coverage = 0.5 - distance;
+            if (coverage <= 0.0) continue;
+            if (coverage > 1.0) coverage = 1.0;
+            blend_pixel(pixels, width, x, y, red, green, blue,
+                        (int)(coverage * 255.0 + 0.5));
         }
     }
-    SelectObject(dc, old_brush);
-    DeleteObject(brush);
+
+    BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+    AlphaBlend(dc, rect.left, rect.top, width, height, g_round_cache.dc, 0, 0,
+               width, height, blend);
 }
 
-static void paint_slider(CardLayout *layout, HDC dc, RECT client, int position, int minimum, int maximum)
+/* ------------------------------------------------------------------ */
+/* Slider thumb (antialiased, cached)                                 */
+/* ------------------------------------------------------------------ */
+
+static void thumb_release(void)
 {
-    /* Erase the complete child surface before drawing the new thumb. Trackbar's
-     * default item invalidation only covers the new thumb, so old positions
-     * otherwise accumulate as a dotted trail during a drag. */
-    HBRUSH background = CreateSolidBrush(RGB(255, 255, 255));
-    FillRect(dc, &client, background);
-    DeleteObject(background);
+    if (g_thumb.dc && g_thumb.bitmap) {
+        SelectObject(g_thumb.dc, GetStockObject(NULL_BRUSH));
+    }
+    if (g_thumb.dc) DeleteDC(g_thumb.dc);
+    if (g_thumb.bitmap) DeleteObject(g_thumb.bitmap);
+    memset(&g_thumb, 0, sizeof(g_thumb));
+}
 
-    int padding = scale_px(8, layout->dpi);
-    int left = client.left + padding;
-    int right = client.right - padding;
-    int cy = (client.top + client.bottom) / 2;
+static bool thumb_build(int diameter, double ring, int pad)
+{
+    int size = diameter + pad * 2;
+    if (g_thumb.bitmap && g_thumb.size == size && g_thumb.diameter == diameter) {
+        return true;
+    }
+    thumb_release();
+
+    BITMAPINFO info;
+    memset(&info, 0, sizeof(info));
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = size;
+    info.bmiHeader.biHeight = -size;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+
+    void *bits = NULL;
+    HBITMAP bitmap = CreateDIBSection(NULL, &info, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (!bitmap || !bits) {
+        if (bitmap) DeleteObject(bitmap);
+        return false;
+    }
+    HDC dc = CreateCompatibleDC(NULL);
+    if (!dc) {
+        DeleteObject(bitmap);
+        return false;
+    }
+    SelectObject(dc, bitmap);
+    memset(bits, 0, (size_t)size * (size_t)size * 4);
+
+    unsigned char *pixels = (unsigned char *)bits;
+    double center = size * 0.5;
+    double radius = diameter * 0.5;
+    int ring_r = GetRValue(COL_THUMB_RING), ring_g = GetGValue(COL_THUMB_RING), ring_b = GetBValue(COL_THUMB_RING);
+
+    for (int y = 0; y < size; y++) {
+        for (int x = 0; x < size; x++) {
+            double dx = x + 0.5 - center;
+            double dy = y + 0.5 - center;
+            double distance = sqrt(dx * dx + dy * dy);
+
+            /* Antialias both edges of the ring. Stepping straight from white
+             * to the ring colour at its inner edge leaves a 1 px hard circle
+             * inside a soft outer edge, which reads as "not round". */
+            /* Contact shadow only under the lower arc: a shadow around the
+             * whole perimeter reads as a light halo next to the white fill. */
+            if (dy > radius * 0.35 && distance > radius - 0.5 && distance < radius + 2.0) {
+                int alpha = (int)((1.0 - (distance - radius + 0.5) / 2.5) * 44.0);
+                blend_pixel(pixels, size, x, y, 12, 16, 24, alpha);
+            }
+
+            double outer_coverage = radius - distance + 0.5;
+            if (outer_coverage <= 0.0) continue;
+            if (outer_coverage > 1.0) outer_coverage = 1.0;
+
+            double ring_mix = distance - (radius - ring) + 0.5;
+            if (ring_mix < 0.0) ring_mix = 0.0;
+            if (ring_mix > 1.0) ring_mix = 1.0;
+
+            int red = (int)(255 + (ring_r - 255) * ring_mix);
+            int green = (int)(255 + (ring_g - 255) * ring_mix);
+            int blue = (int)(255 + (ring_b - 255) * ring_mix);
+            blend_pixel(pixels, size, x, y, red, green, blue,
+                        (int)(outer_coverage * 255.0 + 0.5));
+        }
+    }
+
+    g_thumb.dc = dc;
+    g_thumb.bitmap = bitmap;
+    g_thumb.bits = bits;
+    g_thumb.size = size;
+    g_thumb.diameter = diameter;
+    return true;
+}
+
+static void draw_slider_thumb(CardLayout *layout, HDC dc, int center_x, int center_y)
+{
+    int diameter = scale_px(20, layout->dpi);
+    /* The ring needs a solid core: with 2 px the antialiased inner and
+     * outer edges eat most of it and the ring reads as a broken outline. */
+    double ring = 2.6 * (double)layout->dpi / 96.0;
+    int pad = scale_px(4, layout->dpi);
+    if (!thumb_build(diameter, ring, pad)) {
+        return;
+    }
+    BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+    AlphaBlend(dc, center_x - g_thumb.size / 2, center_y - g_thumb.size / 2,
+               g_thumb.size, g_thumb.size, g_thumb.dc, 0, 0, g_thumb.size, g_thumb.size,
+               blend);
+}
+
+/* ------------------------------------------------------------------ */
+/* Controls                                                           */
+/* ------------------------------------------------------------------ */
+
+static void paint_track(CardLayout *layout, HDC dc, int left, int right, int center_y,
+                        int position, int minimum, int maximum)
+{
+    int half = scale_px(2, layout->dpi);
+    int radius = scale_px(2, layout->dpi);
     int center = left + MulDiv(right - left, position - minimum, maximum - minimum);
-    int half_track = scale_px(2, layout->dpi);
-    RECT inactive = {left, cy - half_track, right, cy + half_track};
-    HBRUSH brush = CreateSolidBrush(RGB(0xF0, 0xF1, 0xF4));
-    FillRect(dc, &inactive, brush);
-    DeleteObject(brush);
-    RECT active = inactive;
-    active.right = center;
-    brush = CreateSolidBrush(RGB(0x31, 0x38, 0x44));
-    FillRect(dc, &active, brush);
-    DeleteObject(brush);
 
-    draw_slider_thumb(layout, dc, center, cy);
+    RECT track_rect = {left, center_y - half, right, center_y + half};
+    fill_round_rect(dc, track_rect, radius, COL_TRACK, COL_TRACK);
+
+    int active_right = center > left + radius ? center : left + radius;
+    RECT active_rect = {left, center_y - half, active_right, center_y + half};
+    fill_round_rect(dc, active_rect, radius, COL_ACCENT, COL_ACCENT);
+
+    draw_slider_thumb(layout, dc, center, center_y);
+}
+
+static void paint_button(CardLayout *layout, HDC dc, RECT rect, int id, UINT state, int y_offset)
+{
+    bool primary = id == CARD_ID_DONE;
+    bool hot = g_controls.hot_id == id;
+    bool pressed = (state & ODS_SELECTED) != 0;
+
+    if (primary) {
+        COLORREF fill = pressed ? COL_ACCENT_PRESS : COL_ACCENT;
+        COLORREF top = pressed ? RGB(0x24, 0x2A, 0x36) : RGB(0x33, 0x3B, 0x4A);
+        int radius = scale_px(10, layout->dpi);
+        fill_round_rect(dc, rect, radius, top, fill);
+        draw_text(layout, dc, L"完成", rect, 13, FW_MEDIUM, RGB(255, 255, 255), DT_CENTER, fill, UI_FACE);
+        return;
+    }
+
+    fill_surface(dc, layout, rect, y_offset);
+    if (hot || pressed) {
+        int radius = scale_px(8, layout->dpi);
+        COLORREF hot_fill = pressed ? COL_PRESS_BG : COL_HOVER_BG;
+        fill_round_rect(dc, rect, radius, hot_fill, hot_fill);
+    }
+
+    /* One icon family for all three controls: the values below are tuned so
+     * the ink heights match at every DPI (the glyphs do not share one box). */
+    COLORREF ink = (hot || pressed) ? COL_ICON_HOT : COL_ICON;
+    if (id == CARD_ID_CLOSE) {
+        draw_system_icon(layout, dc, rect, L"\xE8BB", 13, ink);   /* ChromeClose */
+    } else if (id == CARD_ID_BACK) {
+        draw_system_icon(layout, dc, rect, L"\xE76B", 13, ink);   /* ChevronLeft */
+    } else {
+        draw_system_icon(layout, dc, rect, L"\xE713", 16, ink);   /* Setting */
+    }
+}
+
+static void paint_slider(CardLayout *layout, HDC dc, RECT client, int y_offset,
+                         int position, int minimum, int maximum)
+{
+    /* Paint the parent gradient instead of a flat patch; the trackbar's own
+     * invalidation only covers the new thumb, so the whole client is redrawn. */
+    fill_surface(dc, layout, client, y_offset);
+    int center_y = (client.top + client.bottom) / 2;
+    int pad = scale_px(TRACK_PAD_PX, layout->dpi);
+    paint_track(layout, dc, client.left + pad, client.right - pad, center_y,
+                position, minimum, maximum);
 }
 
 static void slider_draw(HWND window, HDC dc, App *app)
@@ -410,7 +776,9 @@ static void slider_draw(HWND window, HDC dc, App *app)
     int minimum = (int)SendMessageW(window, TBM_GETRANGEMIN, 0, 0);
     int maximum = (int)SendMessageW(window, TBM_GETRANGEMAX, 0, 0);
     int position = (int)SendMessageW(window, TBM_GETPOS, 0, 0);
-    paint_slider(&g_layout, dc, client, position, minimum, maximum);
+    POINT origin = {0, 0};
+    MapWindowPoints(window, GetParent(window), &origin, 1);
+    paint_slider(&g_layout, dc, client, origin.y, position, minimum, maximum);
     (void)app;
 }
 
@@ -433,9 +801,11 @@ static LRESULT CALLBACK slider_subclass_proc(HWND window, UINT message, WPARAM w
         slider_draw(window, (HDC)wparam, app);
         return 0;
     case WM_SETFOCUS:
-    case WM_KILLFOCUS:
+        /* The custom track has no focus ring; the thumb itself is the cue.
+         * Swallowing this keeps the platform from painting a dotted box. */
         InvalidateRect(window, NULL, TRUE);
-        break;
+        return 0;
+    case WM_KILLFOCUS:
     case WM_THEMECHANGED:
     case WM_UPDATEUISTATE:
         InvalidateRect(window, NULL, TRUE);
@@ -446,55 +816,120 @@ static LRESULT CALLBACK slider_subclass_proc(HWND window, UINT message, WPARAM w
     return DefSubclassProc(window, message, wparam, lparam);
 }
 
-static void paint_text(CardLayout *layout, HDC dc, App *app)
+/* Hover feedback for the owner drawn buttons. */
+static int control_slot(int id)
 {
-    COLORREF text = RGB(0x24, 0x27, 0x2D), muted = RGB(0x7B, 0x81, 0x8C);
-    draw_text(layout, dc, APP_TITLE, scaled_rect(layout, 16, 6, 180, 30), 12, FW_MEDIUM, text, DT_LEFT);
-    paint_button(layout, dc, scaled_rect(layout, 209, 6, 30, 30), CARD_ID_SETTINGS, 0);
-    paint_button(layout, dc, scaled_rect(layout, 242, 6, 30, 30), CARD_ID_CLOSE, 0);
+    switch (id) {
+    case CARD_ID_SETTINGS: return 0;
+    case CARD_ID_CLOSE: return 1;
+    case CARD_ID_BACK: return 2;
+    case CARD_ID_DONE: return 3;
+    default: return -1;
+    }
+}
+
+static LRESULT CALLBACK button_subclass_proc(HWND window, UINT message, WPARAM wparam,
+                                             LPARAM lparam, UINT_PTR subclass_id,
+                                             DWORD_PTR reference)
+{
+    int id = (int)subclass_id;
+    int slot = control_slot(id);
+    (void)reference;
+    switch (message) {
+    case WM_MOUSEMOVE:
+        if (slot >= 0 && !g_controls.tracking[slot]) {
+            TRACKMOUSEEVENT track = {sizeof(track), TME_LEAVE, window, 0};
+            TrackMouseEvent(&track);
+            g_controls.tracking[slot] = true;
+        }
+        if (g_controls.hot_id != id) {
+            g_controls.hot_id = id;
+            InvalidateRect(window, NULL, TRUE);
+        }
+        break;
+    case WM_MOUSELEAVE:
+        if (slot >= 0) g_controls.tracking[slot] = false;
+        if (g_controls.hot_id == id) {
+            g_controls.hot_id = 0;
+            InvalidateRect(window, NULL, TRUE);
+        }
+        break;
+    default:
+        break;
+    }
+    return DefSubclassProc(window, message, wparam, lparam);
+}
+
+static void paint_text(CardLayout *layout, HDC dc, App *app, bool snapshot)
+{
     if (!app->card_settings) {
+        if (snapshot) {
+            paint_button(layout, dc, scaled_rect(layout, CARD_SETTINGS_X, CARD_ICON_Y,
+                                                 CARD_ICON_PX, CARD_ICON_PX), CARD_ID_SETTINGS, 0, 0);
+            paint_button(layout, dc, scaled_rect(layout, CARD_CLOSE_X, CARD_ICON_Y,
+                                                 CARD_ICON_PX, CARD_ICON_PX), CARD_ID_CLOSE, 0, 0);
+        }
+        draw_text(layout, dc, APP_TITLE, scaled_rect(layout, 16, 0, 180, CARD_HEADER_PX),
+                  13, FW_NORMAL, COL_TITLE, DT_LEFT, CLR_NONE, UI_FACE);
         return;
     }
-    paint_button(layout, dc, scaled_rect(layout, 16, 46, 30, 30), CARD_ID_BACK, 0);
-    draw_text(layout, dc, L"设置", scaled_rect(layout, 53, 42, 204, 38), 15, FW_MEDIUM, text, DT_LEFT);
+
+    if (snapshot) {
+        paint_button(layout, dc, scaled_rect(layout, CARD_BACK_X, CARD_ICON_Y,
+                                             CARD_ICON_PX, CARD_ICON_PX), CARD_ID_BACK, 0, 0);
+        paint_button(layout, dc, scaled_rect(layout, CARD_CLOSE_X, CARD_ICON_Y,
+                                             CARD_ICON_PX, CARD_ICON_PX), CARD_ID_CLOSE, 0, 0);
+    }
+    draw_text(layout, dc, L"设置", scaled_rect(layout, 40, 0, 180, CARD_HEADER_PX),
+              15, FW_NORMAL, COL_TITLE, DT_LEFT, CLR_NONE, UI_FACE);
+
     for (int i = 0; i < 2; i++) {
-        int y = 87 + i * 81;
-        int percent = (int)InterlockedCompareExchange(i ? &app->scroll_speed_percent : &app->mouse_speed_percent, 0, 0);
+        int y = i ? FIELD_TWO_Y : FIELD_ONE_Y;
+        int percent = (int)InterlockedCompareExchange(i ? &app->scroll_speed_percent
+                                                        : &app->mouse_speed_percent, 0, 0);
         if (percent < SPEED_MIN_PERCENT || percent > SPEED_MAX_PERCENT) percent = 100;
         wchar_t value[16];
         _snwprintf_s(value, 16, _TRUNCATE, L"%d.%d×", percent / 100, (percent % 100) / 10);
-        draw_text(layout, dc, i ? L"滚动倍率" : L"鼠标灵敏度", scaled_rect(layout, 25, y, 160, 22), 13, FW_MEDIUM, text, DT_LEFT);
-        draw_text(layout, dc, value, scaled_rect(layout, 185, y, 72, 22), 15, FW_NORMAL, text, DT_RIGHT);
-        draw_text(layout, dc, L"0.5×", scaled_rect(layout, 25, y + 55, 100, 16), 11, FW_NORMAL, muted, DT_LEFT);
-        draw_text(layout, dc, L"3×", scaled_rect(layout, 157, y + 55, 100, 16), 11, FW_NORMAL, muted, DT_RIGHT);
-        RECT track = scaled_rect(layout, 33, y + 38, 216, 4);
-        int x = track.left + MulDiv(track.right - track.left, percent - SPEED_MIN_PERCENT,
-                                    SPEED_MAX_PERCENT - SPEED_MIN_PERCENT);
-        int left = track.left;
-        int right = track.right;
-        int cy = scale_px(y + 40, layout->dpi);
-        HBRUSH inactive = CreateSolidBrush(RGB(0xF0, 0xF1, 0xF4));
-        RECT inactive_rect = {left, cy - scale_px(2, layout->dpi), right, cy + scale_px(2, layout->dpi)};
-        FillRect(dc, &inactive_rect, inactive);
-        DeleteObject(inactive);
-        HBRUSH active = CreateSolidBrush(RGB(0x31, 0x38, 0x44));
-        RECT active_rect = inactive_rect;
-        active_rect.right = x;
-        FillRect(dc, &active_rect, active);
-        DeleteObject(active);
-        draw_slider_thumb(layout, dc, x, cy);
+
+        /* Weight 500/600 maps onto the Bold face here (the family ships 400
+         * and 700 only), so labels stay at 400 and hierarchy comes from size
+         * and colour instead of a synthetic semi-bold. */
+        draw_text(layout, dc, i ? L"滚动倍率" : L"鼠标灵敏度",
+                  scaled_rect(layout, 20, y, 140, FIELD_TEXT_H), 13, FW_NORMAL, COL_TEXT, DT_LEFT, CLR_NONE, UI_FACE);
+        draw_text(layout, dc, value,
+                  scaled_rect(layout, 142, y - 1, FIELD_VALUE_W, FIELD_TEXT_H + 2),
+                  15, FW_NORMAL, COL_TITLE, DT_RIGHT, CLR_NONE, UI_FACE_NUM);
+        draw_text(layout, dc, L"0.5×", scaled_rect(layout, 20, y + FIELD_TICKS_DY, 60, 16),
+                  11, FW_NORMAL, COL_TICKS, DT_LEFT, CLR_NONE, UI_FACE_NUM);
+        draw_text(layout, dc, L"3×", scaled_rect(layout, 202, y + FIELD_TICKS_DY, 60, 16),
+                  11, FW_NORMAL, COL_TICKS, DT_RIGHT, CLR_NONE, UI_FACE_NUM);
+
+        if (snapshot) {
+            int center_y = scale_px(y + FIELD_TRACK_DY, layout->dpi);
+            paint_track(layout, dc, scale_px(20, layout->dpi), scale_px(262, layout->dpi),
+                        center_y, percent / SPEED_STEP_PERCENT,
+                        SPEED_MIN_PERCENT / SPEED_STEP_PERCENT,
+                        SPEED_MAX_PERCENT / SPEED_STEP_PERCENT);
+        }
     }
-    paint_button(layout, dc, scaled_rect(layout, 25, 287, 232, 36), CARD_ID_DONE, 0);
+
+    if (snapshot) {
+        paint_button(layout, dc, scaled_rect(layout, DONE_X, DONE_Y, DONE_W, DONE_H),
+                     CARD_ID_DONE, 0, 0);
+    }
 }
 
-static void paint_card(App *app, CardLayout *layout, CardSurface *surface)
+static void paint_card(App *app, CardLayout *layout, CardSurface *surface, bool snapshot)
 {
     memset(surface->bits, 0, (size_t)surface->width * (size_t)surface->height * 4);
     unsigned char *pixels = (unsigned char *)surface->bits;
 
     paint_background(layout, pixels);
-    if (!app->card_settings) paint_qr(layout, surface->dc, app);
-    paint_text(layout, surface->dc, app);
+    if (!app->card_settings) {
+        paint_tile(layout, pixels);
+        paint_qr(layout, surface->dc, app);
+    }
+    paint_text(layout, surface->dc, app, snapshot);
 
     /* GDI leaves the alpha byte undefined. Restore it only well inside the
      * card: the antialiased rim and the shadow keep the alpha painted above,
@@ -574,6 +1009,51 @@ static bool surface_create(CardSurface *surface, int width, int height)
 }
 
 /* ------------------------------------------------------------------ */
+/* Window shape                                                       */
+/* ------------------------------------------------------------------ */
+
+/* A window region is a 1-bit mask, so a rounded corner comes out as a
+ * staircase. Windows 11 can round the window itself, antialiased; only fall
+ * back to a region when that call is unavailable (Windows 10). */
+static bool enable_dwm_corners(HWND window)
+{
+    typedef HRESULT(WINAPI * DwmSetWindowAttributeFn)(HWND, DWORD, LPCVOID, DWORD);
+    static DwmSetWindowAttributeFn set_attribute;
+    static bool resolved;
+
+    if (!resolved) {
+        resolved = true;
+        HMODULE library = LoadLibraryW(L"dwmapi.dll");
+        if (library) {
+            set_attribute =
+                (DwmSetWindowAttributeFn)(void *)GetProcAddress(library, "DwmSetWindowAttribute");
+        }
+    }
+    if (!set_attribute) {
+        return false;
+    }
+    /* 33 = DWMWA_WINDOW_CORNER_PREFERENCE, 2 = DWMWCP_ROUND */
+    int preference = 2;
+    return SUCCEEDED(set_attribute(window, 33, &preference, sizeof(preference)));
+}
+
+static void apply_window_shape(App *app, CardLayout *layout)
+{
+    if (!app->card) {
+        return;
+    }
+    g_corners_by_dwm = enable_dwm_corners(app->card);
+    if (g_corners_by_dwm) {
+        /* Let DWM clip; a leftover region would win and bring the staircase back. */
+        SetWindowRgn(app->card, NULL, TRUE);
+        return;
+    }
+    HRGN region = CreateRoundRectRgn(0, 0, layout->win_w + 1, layout->win_h + 1,
+                                     layout->radius * 2, layout->radius * 2);
+    if (region && !SetWindowRgn(app->card, region, TRUE)) DeleteObject(region);
+}
+
+/* ------------------------------------------------------------------ */
 /* Window                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -593,6 +1073,8 @@ static void sync_controls(App *app)
     ShowWindow(g_controls.done, show);
     ShowWindow(g_controls.mouse, show);
     ShowWindow(g_controls.scroll, show);
+    /* The gear and the back arrow are the same affordance; never both. */
+    ShowWindow(g_controls.settings, app->card_settings ? SW_HIDE : SW_SHOWNA);
     SendMessageW(g_controls.mouse, TBM_SETPOS, TRUE,
                   InterlockedCompareExchange(&app->mouse_speed_percent, 0, 0) / SPEED_STEP_PERCENT);
     SendMessageW(g_controls.scroll, TBM_SETPOS, TRUE,
@@ -614,9 +1096,16 @@ static bool layout_controls(App *app, int dpi)
 {
     if (!build_layout(app, dpi, &g_layout)) return false;
     const struct { HWND window; int x, y, width, height; } controls[] = {
-        {g_controls.settings, 209, 6, 30, 30}, {g_controls.close, 242, 6, 30, 30},
-        {g_controls.back, 16, 46, 30, 30}, {g_controls.done, 25, 287, 232, 36},
-        {g_controls.mouse, 25, 112, 232, 30}, {g_controls.scroll, 25, 193, 232, 30},
+        {g_controls.settings, CARD_SETTINGS_X, CARD_ICON_Y, CARD_ICON_PX, CARD_ICON_PX},
+        {g_controls.close, CARD_CLOSE_X, CARD_ICON_Y, CARD_ICON_PX, CARD_ICON_PX},
+        {g_controls.back, CARD_BACK_X, CARD_ICON_Y, CARD_ICON_PX, CARD_ICON_PX},
+        {g_controls.done, DONE_X, DONE_Y, DONE_W, DONE_H},
+        {g_controls.mouse, DONE_X - TRACK_PAD_PX,
+         FIELD_ONE_Y + FIELD_TRACK_DY - TRACK_WINDOW_H / 2,
+         DONE_W + TRACK_PAD_PX * 2, TRACK_WINDOW_H},
+        {g_controls.scroll, DONE_X - TRACK_PAD_PX,
+         FIELD_TWO_Y + FIELD_TRACK_DY - TRACK_WINDOW_H / 2,
+         DONE_W + TRACK_PAD_PX * 2, TRACK_WINDOW_H},
     };
     HFONT font = CreateFontW(-scale_px(13, dpi), 0, 0, 0, FW_NORMAL,
                              0, 0, 0, DEFAULT_CHARSET, OUT_TT_PRECIS,
@@ -630,11 +1119,9 @@ static bool layout_controls(App *app, int dpi)
     }
     if (g_controls.font) DeleteObject(g_controls.font);
     g_controls.font = font;
-    SendMessageW(g_controls.mouse, TBM_SETTHUMBLENGTH, scale_px(16, dpi), 0);
-    SendMessageW(g_controls.scroll, TBM_SETTHUMBLENGTH, scale_px(16, dpi), 0);
-    HRGN region = CreateRoundRectRgn(0, 0, g_layout.win_w + 1, g_layout.win_h + 1,
-                                    g_layout.radius * 2, g_layout.radius * 2);
-    if (region && !SetWindowRgn(app->card, region, TRUE)) DeleteObject(region);
+    SendMessageW(g_controls.mouse, TBM_SETTHUMBLENGTH, scale_px(18, dpi), 0);
+    SendMessageW(g_controls.scroll, TBM_SETTHUMBLENGTH, scale_px(18, dpi), 0);
+    apply_window_shape(app, &g_layout);
     sync_controls(app);
     return true;
 }
@@ -654,19 +1141,34 @@ static LRESULT CALLBACK card_proc(HWND window, UINT message, WPARAM wparam, LPAR
     case WM_PRINTCLIENT: {
         PAINTSTRUCT paint;
         HDC dc = message == WM_PAINT ? BeginPaint(window, &paint) : (HDC)wparam;
-        if (build_layout(app, g_layout.dpi, &g_layout) &&
-            surface_create(&g_surface, g_layout.win_w, g_layout.win_h)) {
-            paint_card(app, &g_layout, &g_surface);
+        bool ready = build_layout(app, g_layout.dpi, &g_layout) &&
+                     surface_create(&g_surface, g_layout.win_w, g_layout.win_h);
+        int saved = 0;
+        if (ready && message == WM_PRINTCLIENT) {
+            /* DWM does the rounding on screen; a print target has no DWM, so
+             * clip the corners here or captures come out with black corners. */
+            saved = SaveDC(dc);
+            HRGN clip = CreateRoundRectRgn(0, 0, g_layout.win_w + 1, g_layout.win_h + 1,
+                                           g_layout.radius * 2, g_layout.radius * 2);
+            if (clip) {
+                SelectClipRgn(dc, clip);
+                DeleteObject(clip);
+            }
+        }
+        if (ready) {
+            paint_card(app, &g_layout, &g_surface, false);
             BitBlt(dc, 0, 0, g_layout.win_w, g_layout.win_h, g_surface.dc, 0, 0, SRCCOPY);
         }
+        if (saved) RestoreDC(dc, saved);
         if (message == WM_PAINT) EndPaint(window, &paint);
         return 0;
     }
     case WM_NCHITTEST: {
         POINT point = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
         ScreenToClient(window, &point);
-        if (point.y >= 0 && point.y < scale_px(42, g_layout.dpi) &&
-            point.x >= 0 && point.x < scale_px(205, g_layout.dpi)) return HTCAPTION;
+        int drag_left = app->card_settings ? scale_px(40, g_layout.dpi) : 0;
+        if (point.y >= 0 && point.y < scale_px(CARD_HEADER_PX, g_layout.dpi) &&
+            point.x >= drag_left && point.x < scale_px(205, g_layout.dpi)) return HTCAPTION;
         return HTCLIENT;
     }
     case WM_NCLBUTTONDBLCLK:
@@ -704,7 +1206,9 @@ static LRESULT CALLBACK card_proc(HWND window, UINT message, WPARAM wparam, LPAR
             if (scroll) g_controls.scroll_dirty = true;
             else g_controls.mouse_dirty = true;
             app_set_speed(app, scroll, percent, false);
-            RECT value = scaled_rect(&g_layout, 185, scroll ? 168 : 87, 72, 22);
+            RECT value = scaled_rect(&g_layout, 142,
+                                     (scroll ? FIELD_TWO_Y : FIELD_ONE_Y) - 1,
+                                     FIELD_VALUE_W, FIELD_TEXT_H + 2);
             InvalidateRect(window, &value, FALSE);
         }
         InvalidateRect(slider, NULL, TRUE);
@@ -717,14 +1221,22 @@ static LRESULT CALLBACK card_proc(HWND window, UINT message, WPARAM wparam, LPAR
     case WM_DRAWITEM: {
         DRAWITEMSTRUCT *item = (DRAWITEMSTRUCT *)lparam;
         if (item->CtlType == ODT_BUTTON) {
-            paint_button(&g_layout, item->hDC, item->rcItem, (int)item->CtlID, item->itemState);
+            POINT origin = {0, 0};
+            MapWindowPoints(item->hwndItem, window, &origin, 1);
+            paint_button(&g_layout, item->hDC, item->rcItem, (int)item->CtlID,
+                         item->itemState, origin.y);
             return TRUE;
         }
         break;
     }
-    case WM_CTLCOLORSTATIC:
-        SetBkColor((HDC)wparam, RGB(255, 255, 255));
-        return (LRESULT)GetStockObject(WHITE_BRUSH);
+    case WM_CTLCOLORSTATIC: {
+        CardColor color = surface_color(0, g_layout.win_h);
+        static HBRUSH background;
+        if (background) DeleteObject(background);
+        background = CreateSolidBrush(RGB(color.red, color.green, color.blue));
+        SetBkColor((HDC)wparam, RGB(color.red, color.green, color.blue));
+        return (LRESULT)background;
+    }
     case WM_ACTIVATE:
         if (LOWORD(wparam) == WA_INACTIVE) {
             commit_speed(app, false);
@@ -786,6 +1298,11 @@ bool card_create(App *app)
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, 0, 0, 1, 1,
             app->card, (HMENU)(INT_PTR)buttons[i].id, app->instance, NULL);
         if (!*buttons[i].target) { card_destroy(app); return false; }
+        if (!SetWindowSubclass(*buttons[i].target, button_subclass_proc,
+                               (UINT_PTR)buttons[i].id, (DWORD_PTR)app)) {
+            card_destroy(app);
+            return false;
+        }
     }
     const struct { int id; const wchar_t *label; HWND *target; } sliders[] = {
         {CARD_ID_MOUSE, L"鼠标灵敏度", &g_controls.mouse},
@@ -817,11 +1334,17 @@ void card_destroy(App *app)
 {
     if (g_controls.mouse) RemoveWindowSubclass(g_controls.mouse, slider_subclass_proc, CARD_ID_MOUSE);
     if (g_controls.scroll) RemoveWindowSubclass(g_controls.scroll, slider_subclass_proc, CARD_ID_SCROLL);
+    if (g_controls.settings) RemoveWindowSubclass(g_controls.settings, button_subclass_proc, CARD_ID_SETTINGS);
+    if (g_controls.close) RemoveWindowSubclass(g_controls.close, button_subclass_proc, CARD_ID_CLOSE);
+    if (g_controls.back) RemoveWindowSubclass(g_controls.back, button_subclass_proc, CARD_ID_BACK);
+    if (g_controls.done) RemoveWindowSubclass(g_controls.done, button_subclass_proc, CARD_ID_DONE);
     if (app->card) {
         DestroyWindow(app->card);
         app->card = NULL;
     }
     surface_destroy(&g_surface);
+    round_cache_release();
+    thumb_release();
     if (g_controls.font) DeleteObject(g_controls.font);
     memset(&g_controls, 0, sizeof(g_controls));
 }
@@ -966,7 +1489,7 @@ bool card_render_to_bmp(App *app, const wchar_t *path)
     if (!surface_create(&surface, layout.win_w, layout.win_h)) {
         return false;
     }
-    paint_card(app, &layout, &surface);
+    paint_card(app, &layout, &surface, true);
 
     int width = layout.win_w;
     int height = layout.win_h;
